@@ -19,6 +19,7 @@
  */
 package com.github.perlundq.yajsync.session;
 
+import java.io.PrintStream;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
@@ -42,6 +43,9 @@ public class RsyncClientSession
     private int _verbosity;
     private Statistics _statistics = new Statistics();
     private boolean _isPreservePermissions;
+    private boolean _isPreserveUser;
+    private boolean _isIgnoreTimes;
+    private boolean _isTransferDirs;
 
     public RsyncClientSession() {}
 
@@ -54,6 +58,18 @@ public class RsyncClientSession
     public RsyncClientSession setIsPreserveTimes(boolean isPreservedTimes)
     {
         _isPreserveTimes = isPreservedTimes;
+        return this;
+    }
+
+    public RsyncClientSession setIsPreserveUser(boolean isPreservedUser)
+    {
+        _isPreserveUser = isPreservedUser;
+        return this;
+    }
+
+    public RsyncClientSession setIsIgnoreTimes(boolean isIgnoreTimes)
+    {
+        _isIgnoreTimes = isIgnoreTimes;
         return this;
     }
 
@@ -87,6 +103,12 @@ public class RsyncClientSession
         return this;
     }
 
+    public RsyncClientSession setIsTransferDirs(boolean isTransferDirs)
+    {
+        _isTransferDirs = isTransferDirs;
+        return this;
+    }
+
     public Statistics statistics()
     {
         return _statistics;
@@ -105,14 +127,20 @@ public class RsyncClientSession
         for (int i = 0; i < _verbosity; i++) {
             sb.append("v");
         }
-        if (_isModuleListing) {
-//            sb.append("d");        // FIXME: BUG: is this really correct
+        if (_isTransferDirs || _isModuleListing && !_isRecursiveTransfer) {
+            sb.append("d");
         }
         if (_isPreservePermissions) {
             sb.append("p");
         }
         if (_isPreserveTimes) {
             sb.append("t");
+        }
+        if (_isPreserveUser) {
+            sb.append("o");
+        }
+        if (_isIgnoreTimes) {
+            sb.append("I");
         }
         if (_isRecursiveTransfer) {
             sb.append("r");
@@ -155,22 +183,25 @@ public class RsyncClientSession
                             String dstArg,
                             AuthProvider authProvider,
                             String moduleName,
-                            boolean isChannelsInterruptible)
+                            boolean isChannelsInterruptible,
+                            PrintStream stdout,
+                            PrintStream stderr)
         throws RsyncException, InterruptedException
     {
         List<String> serverArgs = createServerArgs(srcArgs, dstArg);
-        ClientSessionConfig cfg =                                               // throws IllegalArgumentException if _charset is not supported
-            ClientSessionConfig.handshake(in,
-                                          out,
-                                          _charset,
-                                          _isRecursiveTransfer,
-                                          moduleName,
-                                          serverArgs,
-                                          authProvider);
+        ClientSessionConfig cfg = new ClientSessionConfig(in,
+                                                          out,
+                                                          _charset,
+                                                          _isRecursiveTransfer,
+                                                          stdout,
+                                                          stderr);
 
-        if (cfg.status() == SessionStatus.ERROR) {
+        SessionStatus status = cfg.handshake(moduleName, serverArgs,
+                                             authProvider);
+
+        if (status == SessionStatus.ERROR) {
             return false;
-        } else if (cfg.status() == SessionStatus.EXIT) {
+        } else if (status == SessionStatus.EXIT) {
             return true;
         }
 
@@ -182,17 +213,25 @@ public class RsyncClientSession
                                                      _charset,
                                                      cfg.checksumSeed()).
                 setIsRecursive(_isRecursiveTransfer).
-                setIsInterruptible(isChannelsInterruptible);
+                setIsPreserveUser(_isPreserveUser).
+                setIsInterruptible(isChannelsInterruptible).
+                setIsSafeFileList(cfg.isSafeFileList());
+            boolean isTransferDirs = _isTransferDirs ||
+                                     _isModuleListing && !_isRecursiveTransfer;
+            sender.setIsTransferDirs(isTransferDirs);
             boolean isOK = RsyncTaskExecutor.exec(executor, sender);
             _statistics = sender.statistics();
             return isOK;
         } else {
             Generator generator =
                 Generator.newClientInstance(out, cfg.charset(),
-                                            cfg.checksumSeed()).
+                                            cfg.checksumSeed(),
+                                            stdout).
                     setIsRecursive(_isRecursiveTransfer).
                     setIsPreservePermissions(_isPreservePermissions).
                     setIsPreserveTimes(_isPreserveTimes).
+                    setIsPreserveUser(_isPreserveUser).
+                    setIsIgnoreTimes(_isIgnoreTimes).
                     setIsAlwaysItemize(_verbosity > 1).
                     setIsListOnly(_isModuleListing).
                     setIsInterruptible(isChannelsInterruptible);
@@ -203,10 +242,12 @@ public class RsyncClientSession
                 setIsRecursive(_isRecursiveTransfer).
                 setIsPreservePermissions(_isPreservePermissions).
                 setIsPreserveTimes(_isPreserveTimes).
+                setIsPreserveUser(_isPreserveUser).
                 setIsListOnly(_isModuleListing).
                 setIsDeferredWrite(_isDeferredWrite).
                 setIsInterruptible(isChannelsInterruptible).
-                setIsExitAfterEOF(true);
+                setIsExitAfterEOF(true).
+                setIsSafeFileList(cfg.isSafeFileList());
             boolean isOK = RsyncTaskExecutor.exec(executor, generator,
                                                          receiver);
             _statistics = receiver.statistics();

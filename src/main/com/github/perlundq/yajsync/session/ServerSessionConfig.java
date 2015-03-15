@@ -58,8 +58,12 @@ public class ServerSessionConfig extends SessionConfig
     private boolean _isSender = false;
     private boolean _isPreservePermissions = false;
     private boolean _isPreserveTimes = false;
+    private boolean _isPreserveUser = false;
+    private boolean _isIgnoreTimes = false;
     private Module _module;
     private int _verbosity = 0;
+    private boolean _isSafeFileList;
+    private boolean _isTransferDirs = false;
 
 
     /**
@@ -253,56 +257,81 @@ public class ServerSessionConfig extends SessionConfig
         argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "sender", "", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     setIsSender();
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "recursive", "r", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     enableRecursiveTransfer();
                 }}));
 
         argsParser.add(Option.newStringOption(
             Option.Policy.REQUIRED,
             "rsh", "e", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     parsePeerCompatibilites((String) option.getValue());
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "ignore-times", "I", "",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        setIsIgnoreTimes();
+                    }}));
+
+        argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "verbose", "v", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     increaseVerbosity();
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
+            "owner", "o", "",
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
+                    setIsPreserveUser();
+                }}));
+
+        argsParser.add(Option.newWithoutArgument(
+            Option.Policy.OPTIONAL,
             "perms", "p", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     setIsPreservePermissions();
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "times", "t", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     setIsPreserveTimes();
                 }}));
 
 
+        argsParser.add(Option.newWithoutArgument(
+            Option.Policy.OPTIONAL,
+            "dirs", "d", "",
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
+                _isTransferDirs = true;
+                }}));
+
         // FIXME: let ModuleProvider mutate this argsParser instance before
         // calling parse (e.g. adding specific options or removing options)
 
-        argsParser.parse(receivedArguments);
+        ArgumentParser.Status rc = argsParser.parse(receivedArguments);
+        assert rc == ArgumentParser.Status.CONTINUE;
         assert !_isRecursiveTransfer || _isIncrementalRecurse :
                "We support only incremental recursive transfers for now";
 
@@ -380,13 +409,7 @@ public class ServerSessionConfig extends SessionConfig
             }
             if (str.contains("s")) { // CF_SYMLINK_ICONV
             }
-            if (str.contains("f")) { // CF_SAFE_FLIST
-                // NOP, corresponds to use_safe_inc_flist in native rsync
-            } else {
-                throw new RsyncProtocolException(
-                    String.format("Peer does not support safe file lists: %s",
-                                  str));
-            }
+            _isSafeFileList = str.contains("f");
         } else {
             throw new RsyncProtocolException(
                 String.format("Protocol not supported - got %s from peer",
@@ -396,7 +419,10 @@ public class ServerSessionConfig extends SessionConfig
 
     private void sendCompatibilities() throws ChannelException
     {
-        byte flags = RsyncCompatibilities.CF_SAFE_FLIST;
+        byte flags = 0;
+        if (_isSafeFileList) {
+            flags |= RsyncCompatibilities.CF_SAFE_FLIST;
+        }
         if (_isIncrementalRecurse) {
             flags |= RsyncCompatibilities.CF_INC_RECURSE;
         }
@@ -426,6 +452,16 @@ public class ServerSessionConfig extends SessionConfig
         _isPreserveTimes = true;
     }
 
+    private void setIsPreserveUser()
+    {
+        _isPreserveUser = true;
+    }
+
+    private void setIsIgnoreTimes()
+    {
+        _isIgnoreTimes = true;
+    }
+
     public boolean isSender()
     {
         return _isSender;
@@ -451,6 +487,21 @@ public class ServerSessionConfig extends SessionConfig
         return _isPreserveTimes;
     }
 
+    public boolean isPreserveUser()
+    {
+        return _isPreserveUser;
+    }
+
+    public boolean isIgnoreTimes()
+    {
+        return _isIgnoreTimes;
+    }
+
+    public boolean isSafeFileList()
+    {
+        return _isSafeFileList;
+    }
+
     public Path getReceiverDestination()
     {
         assert _receiverDestination != null;
@@ -465,5 +516,10 @@ public class ServerSessionConfig extends SessionConfig
     private String receiveModule() throws ChannelException
     {
         return readLine();
+    }
+
+    public boolean isTransferDirs()
+    {
+        return _isTransferDirs;
     }
 }

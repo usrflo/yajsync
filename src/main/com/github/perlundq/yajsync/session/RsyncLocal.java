@@ -19,6 +19,7 @@
 package com.github.perlundq.yajsync.session;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.channels.Pipe;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
@@ -33,9 +34,13 @@ public class RsyncLocal
     private boolean _isRecursiveTransfer;
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
+    private boolean _isPreserveUser;
+    private boolean _isIgnoreTimes;
     private boolean _isDeferredWrite;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
     private Statistics _statistics = new Statistics();
+    private boolean _isTransferDirs = false;
+    private boolean _isModuleListing = false;
 
     public RsyncLocal() {}
 
@@ -47,6 +52,11 @@ public class RsyncLocal
     public void setCharset(Charset charset)
     {
         _charset = charset;
+    }
+
+    public void setIsModuleListing(boolean isModuleListing)
+    {
+        _isModuleListing = isModuleListing;
     }
 
     public void setIsRecursiveTransfer(boolean isRecursiveTransfer)
@@ -64,9 +74,24 @@ public class RsyncLocal
         _isPreserveTimes = isPreserveTimes;
     }
 
+    public void setIsPreserveUser(boolean isPreserveUser)
+    {
+        _isPreserveUser = isPreserveUser;
+    }
+
+    public void setIsIgnoreTimes(boolean isIgnoreTimes)
+    {
+        _isIgnoreTimes = isIgnoreTimes;
+    }
+
     public void setIsDeferredWrite(boolean isDeferredWrite)
     {
         _isDeferredWrite = isDeferredWrite;
+    }
+
+    public void setIsTransferDirs(boolean isTransferDirs)
+    {
+        _isTransferDirs = isTransferDirs;
     }
 
     private Pipe[] pipePair()
@@ -80,6 +105,7 @@ public class RsyncLocal
     }
 
     public boolean transfer(ExecutorService executor,
+                            PrintStream out,
                             Iterable<Path> srcPaths,
                             String destinationPathName)
         throws RsyncException, InterruptedException
@@ -90,18 +116,25 @@ public class RsyncLocal
         Pipe toSender = pipePair[0];
         Pipe toReceiver = pipePair[1];
 
+        boolean isTransferDirs = _isTransferDirs ||
+                                 _isModuleListing && !_isRecursiveTransfer;
         Sender sender = new Sender(toSender.source(),
                                    toReceiver.sink(),
                                    srcPaths,
                                    _charset,
                                    checksumSeed).
+            setIsPreserveUser(_isPreserveUser).
             setIsExitEarlyIfEmptyList(true).
-            setIsRecursive(_isRecursiveTransfer);
+            setIsRecursive(_isRecursiveTransfer).
+            setIsTransferDirs(isTransferDirs);
         Generator generator = new Generator(toSender.sink(), _charset,
-                                            checksumSeed).
+                                            checksumSeed, out).
             setIsRecursive(_isRecursiveTransfer).
             setIsPreservePermissions(_isPreservePermissions).
             setIsPreserveTimes(_isPreserveTimes).
+            setIsPreserveUser(_isPreserveUser).
+            setIsIgnoreTimes(_isIgnoreTimes).
+            setIsListOnly(_isModuleListing).
             setIsAlwaysItemize(_verbosity > 1);
         Receiver receiver = new Receiver(generator,
                                          toReceiver.source(),
@@ -111,6 +144,8 @@ public class RsyncLocal
             setIsRecursive(_isRecursiveTransfer).
             setIsPreservePermissions(_isPreservePermissions).
             setIsPreserveTimes(_isPreserveTimes).
+            setIsPreserveUser(_isPreserveUser).
+            setIsListOnly(_isModuleListing).
             setIsDeferredWrite(_isDeferredWrite);
 
         boolean isOK = RsyncTaskExecutor.exec(executor, sender,
