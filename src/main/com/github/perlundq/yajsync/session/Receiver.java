@@ -33,8 +33,10 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -48,6 +50,7 @@ import com.github.perlundq.yajsync.filelist.ConcurrentFilelist;
 import com.github.perlundq.yajsync.filelist.FileInfo;
 import com.github.perlundq.yajsync.filelist.Filelist;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
+import com.github.perlundq.yajsync.filelist.User;
 import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.text.TextConversionException;
@@ -71,7 +74,7 @@ public class Receiver implements RsyncTask,MessageHandler
     private static class FileInfoStub {
         private final String _pathName;
         private final byte[] _pathNameBytes;
-        private final RsyncFileAttributes _attrs;
+        private RsyncFileAttributes _attrs;
 
         private FileInfoStub(String pathName, byte[] pathNameBytes,
                              RsyncFileAttributes attrs) {
@@ -106,6 +109,7 @@ public class Receiver implements RsyncTask,MessageHandler
 
     private static final int INPUT_CHANNEL_BUF_SIZE = 8 * 1024;
     private final FileInfoCache _fileInfoCache = new FileInfoCache();
+    private final Map<Integer, User> _uidUserMap = new HashMap<>();
     private final Generator _generator;
     private final RsyncInChannel _senderInChannel;
     private final Statistics _stats = new Statistics();
@@ -118,9 +122,11 @@ public class Receiver implements RsyncTask,MessageHandler
     private boolean _isListOnly;
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
+    private boolean _isPreserveUser;
     private boolean _isDeferredWrite;
     private boolean _isInterruptible = true;
     private boolean _isExitAfterEOF;
+    private boolean _isSafeFileList = true;
     private int _ioError;
     private PathResolver _pathResolver;
 
@@ -185,6 +191,12 @@ public class Receiver implements RsyncTask,MessageHandler
         return this;
     }
 
+    public Receiver setIsPreserveUser(boolean isPreserveUser)
+    {
+        _isPreserveUser = isPreserveUser;
+        return this;
+    }
+
     public Receiver setIsDeferredWrite(boolean isDeferredWrite)
     {
         _isDeferredWrite = isDeferredWrite;
@@ -221,6 +233,12 @@ public class Receiver implements RsyncTask,MessageHandler
         return this;
     }
 
+    public Receiver setIsSafeFileList(boolean isSafeFileList)
+    {
+        _isSafeFileList = isSafeFileList;
+        return this;
+    }
+
     @Override
     public boolean isInterruptible()
     {
@@ -254,8 +272,19 @@ public class Receiver implements RsyncTask,MessageHandler
                 sendEmptyFilterRules();
             }
 
+            if (_isPreserveUser && _isRecursive) {
+                _uidUserMap.put(User.root().uid(), User.root());
+            }
+
             List<FileInfoStub> stubs = new LinkedList<>();
             _ioError |= receiveFileMetaDataInto(stubs);
+
+            if (_isPreserveUser && !_isRecursive) {
+                Map<Integer, User> uidUserMap = receiveUserList();
+                uidUserMap.put(User.root().uid(), User.root());
+                addUserNameToStubs(uidUserMap, stubs);
+            }
+
             if (stubs.size() == 0 && _isExitEarlyIfEmptyList) {
                 if (_log.isLoggable(Level.FINE)) {
                     _log.fine("empty file list - exiting early");
@@ -307,6 +336,48 @@ public class Receiver implements RsyncTask,MessageHandler
             throw new RsyncException(e);
         } finally {
             _generator.stop();
+        }
+    }
+
+    /**
+     * @throws RsyncProtocolException if user name is the empty string
+     */
+    private Map<Integer, User> receiveUserList() throws ChannelException
+    {
+        Map<Integer, User> users = new HashMap<>();
+        while (true) {
+            int uid = receiveUserId();
+            boolean isDone = uid == 0;
+            if (isDone) {
+                return users;
+            }
+            String userName = receiveUserName();
+            User user = new User(userName, uid);
+            users.put(uid, user);
+        }
+    }
+
+    private void addUserNameToStubs(Map<Integer, User> uidUserMap,
+                                    List<FileInfoStub> stubs)
+        throws ChannelException
+    {
+        for (FileInfoStub stub : stubs) {
+            RsyncFileAttributes incompleteAttrs = stub._attrs;
+            boolean isComplete = incompleteAttrs.user().name().length() > 0;
+            if (isComplete) {
+                throw new RsyncProtocolException(String.format(
+                    "expected user name of %s to be the empty string",
+                    incompleteAttrs));
+            }
+            User completeUser = uidUserMap.get(incompleteAttrs.user().uid());
+            if (completeUser != null) {
+                RsyncFileAttributes completeAttrs =
+                    new RsyncFileAttributes(incompleteAttrs.mode(),
+                                            incompleteAttrs.size(),
+                                            incompleteAttrs.lastModifiedTime(),
+                                            completeUser);
+                stub._attrs = completeAttrs;
+            }
         }
     }
 
@@ -776,6 +847,30 @@ public class Receiver implements RsyncTask,MessageHandler
             FileOps.setLastModifiedTime(path, targetAttrs.lastModifiedTime(),
                                         LinkOption.NOFOLLOW_LINKS);
         }
+        if (_isPreserveUser && !targetAttrs.user().name().isEmpty() &&
+            !curAttrs.user().name().equals(targetAttrs.user().name())) {
+            if (_log.isLoggable(Level.FINE)) {
+                _log.fine(String.format("updating ownership %s -> %s on %s",
+                                        curAttrs.user(), targetAttrs.user(),
+                                        path));
+            }
+            // FIXME: side effect of chown in Linux is that set user/group id
+            //        bit are cleared.
+            FileOps.setOwner(path, targetAttrs.user(),
+                             LinkOption.NOFOLLOW_LINKS);
+        } else if (_isPreserveUser && targetAttrs.user().name().isEmpty() &&
+             curAttrs.user().uid() != targetAttrs.user().uid())
+        {
+            if (_log.isLoggable(Level.FINE)) {
+                _log.fine(String.format("updating uid %d -> %d on %s",
+                                        curAttrs.user().uid(),
+                                        targetAttrs.user().uid(), path));
+            }
+            // NOTE: side effect of chown in Linux is that set user/group id bit
+            //       might be cleared.
+            FileOps.setUserId(path, targetAttrs.user().uid(),
+                              LinkOption.NOFOLLOW_LINKS);
+        }
     }
 
     private void matchData(Filelist.Segment segment, int index,
@@ -790,7 +885,9 @@ public class Receiver implements RsyncTask,MessageHandler
                                                       md);
         if (isRemoteAndLocalFileIdentical(resultFile, md, fileInfo)) {
             try {
-                if (_isPreservePermissions || _isPreserveTimes) {
+                if (_isPreservePermissions || _isPreserveTimes ||
+                    _isPreserveUser)
+                {
                     updateAttrsIfDiffer(resultFile, fileInfo.attrs());
                 }
                 if (!_isDeferredWrite || !resultFile.equals(fileInfo.path())) {
@@ -803,7 +900,9 @@ public class Receiver implements RsyncTask,MessageHandler
             } catch (IOException e) {
                 _ioError |= IoError.GENERAL;
                 if (_log.isLoggable(Level.SEVERE)) {
-                    _log.log(Level.SEVERE, "", e);
+                    _log.severe(String.format("failed to update attrs on %s: " +
+                                              "%s",
+                                              resultFile, e.getMessage()));
                 }
             }
             _generator.purgeFile(segment, index);
@@ -854,14 +953,17 @@ public class Receiver implements RsyncTask,MessageHandler
                             _senderInChannel.numBytesPrefetched();
 
         while (true) {
-            char flags = (char) _senderInChannel.getByte();
+            char flags = (char) (_senderInChannel.getByte() & 0xFF);
             if (flags == 0) {
                 break;
             }
             if ((flags & TransmitFlags.EXTENDED_FLAGS) != 0) {
-                flags |= _senderInChannel.getByte() << 8;
+                flags |= (_senderInChannel.getByte() & 0xFF) << 8;
                 if (flags == (TransmitFlags.EXTENDED_FLAGS |
                               TransmitFlags.IO_ERROR_ENDLIST)) {
+                    if (!_isSafeFileList) {
+                        throw new RsyncProtocolException("invalid flag " + Integer.toBinaryString(flags));
+                    }
                     ioError |= receiveAndDecodeInt();
                     if (_log.isLoggable(Level.WARNING)) {
                         _log.warning(String.format("peer process returned an " +
@@ -869,6 +971,9 @@ public class Receiver implements RsyncTask,MessageHandler
                     }
                     break;
                 }
+            }
+            if (_log.isLoggable(Level.FINER)) {
+                _log.finer("got flags " + Integer.toBinaryString(flags));
             }
             byte[] pathNameBytes = receivePathNameBytes(flags);
             RsyncFileAttributes attrs = receiveRsyncFileAttributes(flags);
@@ -1032,10 +1137,37 @@ public class Receiver implements RsyncTask,MessageHandler
             _fileInfoCache.setPrevMode(mode);
         }
 
-        if ((xflags & TransmitFlags.SAME_UID) == 0) {
-            throw new RsyncProtocolException("TransmitFlags.SAME_UID is " +
-                                             "required");
+        User user;
+        boolean reusePrevUserId = (xflags & TransmitFlags.SAME_UID) != 0;
+        if (reusePrevUserId) {
+            user = getPreviousUser();
+        } else {
+            if (!_isPreserveUser) {
+                throw new RsyncProtocolException("got new uid when not " +
+                                                 "preserving uid");
+            }
+            boolean isReceiveUserName =
+                (xflags & TransmitFlags.USER_NAME_FOLLOWS) != 0;
+            if (isReceiveUserName && !_isRecursive) {
+                throw new RsyncProtocolException("got user name mapping when " +
+                                                 "not doing incremental " +
+                                                 "recursion");
+            }
+            if (_isRecursive && isReceiveUserName) {
+                user = receiveUser();
+                _uidUserMap.put(user.uid(), user);
+            } else if (_isRecursive) {  // && !isReceiveUsername where isReceiveUserName is only true once for every new mapping, old ones have been sent previously
+                int uid = receiveUserId();
+                user = _uidUserMap.get(uid);  // Note: _uidUserMap contains a predefined mapping for root
+                if (user == null) {
+                    user = new User("", uid);
+                }
+            } else { // if (!_isRecursive) {
+                user = receiveIncompleteUser();  // User with uid but no user name. User name mappings are sent in batch after initial file list
+            }
+            _fileInfoCache.setPrevUser(user);
         }
+
         if ((xflags & TransmitFlags.SAME_GID) == 0) {
             throw new RsyncProtocolException("TransmitFlags.SAME_GID is " +
                                              "required");
@@ -1043,8 +1175,66 @@ public class Receiver implements RsyncTask,MessageHandler
 
         RsyncFileAttributes attrs = new RsyncFileAttributes(mode,
                                                             fileSize,
-                                                            lastModified);      // throws IllegalArgumentException if fileSize or lastModified is negative, but we check for this earlier
+                                                            lastModified,
+                                                            user);      // throws IllegalArgumentException if fileSize or lastModified is negative, but we check for this earlier
         return attrs;
+    }
+
+    private User getPreviousUser()
+    {
+        User user = _fileInfoCache.getPrevUserOrNull();
+        if (user == null) {
+            if (_isPreserveUser) {
+                throw new RsyncProtocolException("expecting to receive user " +
+                                                 "information from peer");
+            }
+            return User.whoami();
+        }
+        return user;
+    }
+
+    private User receiveIncompleteUser() throws ChannelException
+    {
+        int uid = receiveUserId();
+        return new User("", uid);
+    }
+
+    private int receiveUserId() throws ChannelException
+    {
+        int uid = receiveAndDecodeInt();
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("received user id " + uid);
+        }
+        if (uid < 0 || uid > User.UID_MAX) {
+            throw new RsyncProtocolException(String.format(
+                "received illegal value for user id: %d (valid range [0..%d]",
+                uid, User.UID_MAX));
+        }
+        return uid;
+    }
+
+    /**
+     * @throws RsyncProtocolException if user name is the empty string
+     */
+    private String receiveUserName() throws ChannelException
+    {
+        int nameLength = 0xFF & _senderInChannel.getByte();
+        ByteBuffer buf = _senderInChannel.get(nameLength);
+        String userName = _characterDecoder.decode(buf);
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("received user name " + userName);
+        }
+        if (userName.isEmpty()) {
+            throw new RsyncProtocolException("user name is empty");
+        }
+        return userName;
+    }
+
+    private User receiveUser() throws ChannelException
+    {
+        int uid = receiveUserId();
+        String userName = receiveUserName();
+        return new User(userName, uid);
     }
 
     // FIXME: remove me, replace with combineDataToFile
