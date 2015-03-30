@@ -25,7 +25,6 @@ import java.net.InetAddress;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
-import java.nio.file.Paths;
 import java.security.Principal;
 import java.util.Collection;
 import java.util.LinkedList;
