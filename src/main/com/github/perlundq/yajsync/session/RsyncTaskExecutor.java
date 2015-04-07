@@ -36,6 +36,12 @@ public final class RsyncTaskExecutor
     private RsyncTaskExecutor() {}
 
     public static boolean exec(Executor executor, RsyncTask... tasks)
+    		throws RsyncException,InterruptedException
+    {
+    	return exec(executor, null, tasks);
+    }
+
+    public static boolean exec(Executor executor, Module module, RsyncTask... tasks)
         throws RsyncException,InterruptedException
     {
         CompletionService<Boolean> ecs =
@@ -95,6 +101,10 @@ public final class RsyncTaskExecutor
 
         if (_log.isLoggable(Level.FINE)) {
             _log.fine("exit " + (isOK ? "OK" : "ERROR"));
+        }
+
+        if (module!=null) {
+        	module.postProcessing(isOK);
         }
 
         return isOK;

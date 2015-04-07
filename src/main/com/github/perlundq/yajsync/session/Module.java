@@ -25,4 +25,5 @@ public interface Module
     RestrictedPath restrictedPath();
     boolean isReadable();
     boolean isWritable();
+    void postProcessing(boolean isOK);
 }

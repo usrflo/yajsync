@@ -216,6 +216,10 @@ class SimpleRestrictedModule extends RestrictedModule
     public String comment() {
         return _comment;
     }
+
+	@Override
+	public void postProcessing(boolean isOK) {
+	}
 }
 
 class SimpleModule implements Module
@@ -265,6 +269,10 @@ class SimpleModule implements Module
     {
         return _isWritable;
     }
+
+	@Override
+	public void postProcessing(boolean isOK) {
+	}
 }
 
 class TestModules implements Modules
@@ -731,7 +739,7 @@ public class SystemTest
 
   // FIXME: latch might not get decreased if exception occurs
   // FIXME: port might be unavailable, open it here and inject it
-  @Test(timeout=100)
+  @Test(timeout=300)
   public void testProtectedServerConnection() throws InterruptedException, IOException
   {
       final CountDownLatch isListeningLatch = new CountDownLatch(1);

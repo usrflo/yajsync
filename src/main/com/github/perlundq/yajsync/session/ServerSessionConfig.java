@@ -204,6 +204,11 @@ public class ServerSessionConfig extends SessionConfig
         _module = module;
     }
 
+    public Module getModule()
+    {
+		return _module;
+    }
+
     /**
      * @throws TextConversionException
      */
