@@ -30,8 +30,10 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -57,6 +59,8 @@ import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.text.TextConversionException;
 import com.github.perlundq.yajsync.text.TextDecoder;
 import com.github.perlundq.yajsync.text.TextEncoder;
+import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
+import com.github.perlundq.yajsync.util.ArgumentParsingError;
 import com.github.perlundq.yajsync.util.MD5;
 import com.github.perlundq.yajsync.util.PathOps;
 import com.github.perlundq.yajsync.util.Rolling;
@@ -84,6 +88,7 @@ public class Sender implements RsyncTask,MessageHandler
     private boolean _isRecursive;
     private boolean _isPreserveUser;
     private boolean _isSafeFileList = true;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private int _nextSegmentIndex;
     private final Statistics _stats = new Statistics();
     private boolean _isInterruptible = true;
@@ -147,6 +152,11 @@ public class Sender implements RsyncTask,MessageHandler
         return this;
     }
 
+    public Sender setFilterRuleConfiguration(FilterRuleConfiguration filterRuleConfiguration) {
+    	_filterRuleConfiguration = filterRuleConfiguration;
+    	return this;
+    }
+
     public Sender setIsExitAfterEOF(boolean isExitAfterEOF)
     {
         _isExitAfterEOF = isExitAfterEOF;
@@ -206,23 +216,26 @@ public class Sender implements RsyncTask,MessageHandler
     public Boolean call() throws ChannelException, InterruptedException
     {
         Filelist fileList = new Filelist(_isRecursive);
+        FilterRuleConfiguration filterRuleConfiguration;
         try {
             if (_log.isLoggable(Level.FINE)) {
                 _log.fine("Sender.transfer:");
             }
             if (_isReceiveFilterRules) {
-                String rules = receiveFilterRules();
-                if (rules.length() > 0) {
-                    throw new RsyncProtocolException(
-                        String.format("Received a list of filter rules of length " +
-                            "%d from peer, this is not yet supported " +
-                            "(%s)", rules.length(), rules));
-                }
+            	// read remote filter rules
+            	try {
+					filterRuleConfiguration = new FilterRuleConfiguration(receiveFilterRules());
+				} catch (ArgumentParsingError e) {
+					throw new RsyncProtocolException(e);
+				}
+            } else {
+            	// read local filter rules
+            	filterRuleConfiguration = _filterRuleConfiguration;
             }
 
             long t1 = System.currentTimeMillis();
             Filelist.SegmentBuilder builder = new Filelist.SegmentBuilder(null);
-            boolean isInitialListOK = initialExpand(builder, _sourceFiles);
+            boolean isInitialListOK = initialExpand(builder, _sourceFiles, filterRuleConfiguration);
 
             Filelist.Segment initialSegment = fileList.newSegment(builder);
 
@@ -265,7 +278,7 @@ public class Sender implements RsyncTask,MessageHandler
                 return isInitialListOK;
             }
 
-            int ioError = sendFiles(fileList, initialSegment);
+            int ioError = sendFiles(fileList, initialSegment, filterRuleConfiguration);
             if (ioError != 0) {
                 sendIntMessage(MessageCode.IO_ERROR, ioError);
             }
@@ -392,19 +405,26 @@ public class Sender implements RsyncTask,MessageHandler
     /**
      * @throws RsyncProtocolException if failing to decode the filter rules
      */
-    private String receiveFilterRules() throws ChannelException
+    private List<String> receiveFilterRules() throws ChannelException
     {
-        try {
-            int numBytesToRead = _duplexChannel.getInt();
-            ByteBuffer buf = _duplexChannel.get(numBytesToRead);
-            String filterRules = _characterDecoder.decode(buf);
-            return filterRules;
-        } catch (TextConversionException e) {
-            throw new RsyncProtocolException(e);
+    	int numBytesToRead;
+    	List<String> list = new ArrayList<>();
+
+    	try {
+
+    		while ((numBytesToRead = _duplexChannel.getInt())>0 ) {
+                ByteBuffer buf = _duplexChannel.get(numBytesToRead);
+                list.add(_characterDecoder.decode(buf));
+    		}
+
+    		return list;
+
+    	} catch (TextConversionException e) {
+    		throw new RsyncProtocolException(e);
         }
     }
 
-    private int sendFiles(Filelist fileList, Filelist.Segment firstSegment)
+    private int sendFiles(Filelist fileList, Filelist.Segment firstSegment, FilterRuleConfiguration parentFilterRuleConfiguration)
         throws ChannelException
     {
         boolean sentEOF = false;
@@ -416,7 +436,7 @@ public class Sender implements RsyncTask,MessageHandler
             // TODO: make asynchronous (separate indexer thread)
             boolean isOK = true;
             if (fileList.isExpandable()) {
-                isOK = expandAndSendSegments(fileList);
+                isOK = expandAndSendSegments(fileList, parentFilterRuleConfiguration);
             }
             if (_isRecursive && !fileList.isExpandable() && !sentEOF) {
                 if (_log.isLoggable(Level.FINE)) {
@@ -626,7 +646,7 @@ public class Sender implements RsyncTask,MessageHandler
     // NOTE: doesn't do any check of the validity of files or normalization -
     // it's up to the caller to do so, e.g. ServerSessionConfig.parseArguments
     private boolean initialExpand(Filelist.SegmentBuilder builder,
-                                  Iterable<Path> files)
+                                  Iterable<Path> files, FilterRuleConfiguration parentFilterRuleConfiguration)
     {
         boolean isOK = true;
 
@@ -661,7 +681,7 @@ public class Sender implements RsyncTask,MessageHandler
                 }
                 builder.add(fileInfo);
                 if (fileInfo.isDotDir()) {
-                    boolean isExpandOK = expand(builder, fileInfo);
+                    boolean isExpandOK = expand(builder, fileInfo, parentFilterRuleConfiguration);
                     isOK = isOK && isExpandOK;
                     _nextSegmentIndex++; // we have to add it to be compliant with native, but don't try expanding it again later
                 }
@@ -684,13 +704,28 @@ public class Sender implements RsyncTask,MessageHandler
         return isOK;
     }
 
-    private boolean expand(Filelist.SegmentBuilder builder, FileInfo directory)
+    private boolean expand(Filelist.SegmentBuilder builder, FileInfo directory, FilterRuleConfiguration parentFilterRuleConfiguration)
     {
+        // assert _isRecursive;
         assert builder != null;
         assert directory != null;
 
         boolean isOK = true;
         final Path localPart = getLocalPathOf(directory);                       // throws RuntimeException if unable to get local path prefix of directory, but that should never happen
+
+        FilterRuleConfiguration localFilterRuleConfiguration;
+		try {
+			// FSTODO: directory to Path
+			localFilterRuleConfiguration = new FilterRuleConfiguration(parentFilterRuleConfiguration, directory.path().toString());
+		} catch (ArgumentParsingError e) {
+            if (_log.isLoggable(Level.WARNING)) {
+                _log.warning(String.format("Got argument parsing error " +
+                                           "at %s: %s",
+                                           directory.path(), e.getMessage()));
+            }
+            return false;
+		}
+        boolean filterByRules = localFilterRuleConfiguration.isFilterAvailable();
 
         // the JVM adds a lot of overhead when doing mostly directory traversals
         // and reading of file attributes
@@ -698,6 +733,12 @@ public class Sender implements RsyncTask,MessageHandler
                 Files.newDirectoryStream(directory.path())) {
 
             for (Path entry : stream) {
+
+            	// use filter
+            	if (filterByRules && localFilterRuleConfiguration.exclude(entry.toString(), Files.isDirectory(entry))) {
+            		continue;
+                }
+
                 if (!PathOps.isPathPreservable(entry.getFileName())) {          // TODO: add option to continue anyway
                     if (_log.isLoggable(Level.WARNING)) {
                         _log.warning(String.format(
@@ -752,7 +793,7 @@ public class Sender implements RsyncTask,MessageHandler
     // TODO: FEATURE: (if possible in native) implement suspend/resume such that
     // we don't have to send/hold a full segment in memory at once (directories
     // can be very large).
-    private boolean expandAndSendSegments(Filelist fileList)
+    private boolean expandAndSendSegments(Filelist fileList, FilterRuleConfiguration parentFilterRuleConfiguration)
         throws ChannelException
     {
         boolean isOK = true;
@@ -784,7 +825,7 @@ public class Sender implements RsyncTask,MessageHandler
 
             Filelist.SegmentBuilder builder =
                 new Filelist.SegmentBuilder(directory);
-            boolean isExpandOK = expand(builder, directory);
+            boolean isExpandOK = expand(builder, directory, parentFilterRuleConfiguration);
             if (!isExpandOK && _log.isLoggable(Level.WARNING)) {
                 _log.warning("initial file list expansion returned an error");
             }

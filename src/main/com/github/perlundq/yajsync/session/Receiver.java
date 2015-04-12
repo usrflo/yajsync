@@ -49,12 +49,15 @@ import com.github.perlundq.yajsync.channels.RsyncInChannel;
 import com.github.perlundq.yajsync.filelist.ConcurrentFilelist;
 import com.github.perlundq.yajsync.filelist.FileInfo;
 import com.github.perlundq.yajsync.filelist.Filelist;
+import com.github.perlundq.yajsync.filelist.FilterRuleList;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
 import com.github.perlundq.yajsync.filelist.User;
 import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.text.TextConversionException;
 import com.github.perlundq.yajsync.text.TextDecoder;
+import com.github.perlundq.yajsync.text.TextEncoder;
+import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
 import com.github.perlundq.yajsync.util.Environment;
 import com.github.perlundq.yajsync.util.FileOps;
 import com.github.perlundq.yajsync.util.MD5;
@@ -114,8 +117,10 @@ public class Receiver implements RsyncTask,MessageHandler
     private final RsyncInChannel _senderInChannel;
     private final Statistics _stats = new Statistics();
     private final TextDecoder _characterDecoder;
+    private final TextEncoder _characterEncoder;
     private final String _targetPathName;
     private boolean _isSendFilterRules;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private boolean _isReceiveStatistics;
     private boolean _isExitEarlyIfEmptyList;
     private boolean _isRecursive;
@@ -139,6 +144,7 @@ public class Receiver implements RsyncTask,MessageHandler
                                               this,
                                               INPUT_CHANNEL_BUF_SIZE);
         _characterDecoder = TextDecoder.newStrict(charset);
+        _characterEncoder = TextEncoder.newStrict(charset);
         _generator = generator;
         _targetPathName = targetPathName;
     }
@@ -220,6 +226,11 @@ public class Receiver implements RsyncTask,MessageHandler
         _isSendFilterRules = isSendFilterRules;
         return this;
     }
+    
+    public Receiver setFilterRuleConfiguration(FilterRuleConfiguration filterRuleConfiguration) {
+    	_filterRuleConfiguration = filterRuleConfiguration;
+    	return this;
+    }
 
     public Receiver setIsReceiveStatistics(boolean isReceiveStatistics)
     {
@@ -260,16 +271,18 @@ public class Receiver implements RsyncTask,MessageHandler
                                         "isDeferredWrite=%s," +
                                         " isListOnly=%s, isPreserveTimes=%s, " +
                                         "isRecursive=%s, sendFilterRules=%s, " +
+                                        "filterRules=%s, " +
                                         "receiveStatistics=%s, " +
                                         "exitEarlyIfEmptyList=%s",
                                         _targetPathName, _isDeferredWrite,
                                         _isListOnly, _isPreserveTimes,
                                         _isRecursive, _isSendFilterRules,
+                                        _filterRuleConfiguration.getFilterRuleList()._rules,
                                         _isReceiveStatistics,
                                         _isExitEarlyIfEmptyList));
             }
             if (_isSendFilterRules) {
-                sendEmptyFilterRules();
+                sendFilterRules();
             }
 
             if (_isPreserveUser && _isRecursive) {
@@ -502,9 +515,23 @@ public class Receiver implements RsyncTask,MessageHandler
         _stats.setTotalWritten(totalWritten);
     }
 
-    private void sendEmptyFilterRules() throws InterruptedException
+    private void sendFilterRules() throws InterruptedException
     {
-        ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+    	if (_filterRuleConfiguration.getFilterRuleList()._rules.size()>0) {
+    		
+    		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleList()._rules) {
+    			byte[] encodedRule = _characterEncoder.encode(rule.toString());
+    			
+    			ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
+    			buf.putInt(encodedRule.length);
+    			buf.put(encodedRule);
+    			buf.flip();
+    	        _generator.sendBytes(buf);
+    		}
+    	}
+    	
+    	// send stop signal
+    	ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
         buf.putInt(0);
         buf.flip();
         _generator.sendBytes(buf);

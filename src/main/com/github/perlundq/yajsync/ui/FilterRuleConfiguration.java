@@ -25,6 +25,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.List;
 
 import com.github.perlundq.yajsync.filelist.FilterRuleList;
 import com.github.perlundq.yajsync.util.ArgumentParsingError;
@@ -32,10 +33,19 @@ import com.github.perlundq.yajsync.util.ArgumentParsingError;
 public class FilterRuleConfiguration {
 
 	private FilterRuleConfiguration _parentRuleConfiguration = null;
+	// private List<MergeRule> _mergeRuleList = new ArrayList<>();
 	private FilterRuleList _localRuleList = new FilterRuleList();
 	private boolean _inheritance = true;
 	private String _dirMergeFilename = null;
-	private String _dirname;
+	private String _dirname = null;
+
+	// FSTODO: CustomFileSystem.getConfigPath( ... )
+
+	public FilterRuleConfiguration(List<String> inputFilterRules) throws ArgumentParsingError {
+		for (String inputFilterRule : inputFilterRules) {
+			readRule(inputFilterRule);
+		}
+	}
 
 	public FilterRuleConfiguration(
 			FilterRuleConfiguration parentRuleConfiguration, String dirname)
@@ -48,6 +58,10 @@ public class FilterRuleConfiguration {
 		}
 		_dirname = dirname;
 
+		// directory specific initialization of rules, FSTODO: no inheritance?
+		// _mergeRuleList = parentRuleConfiguration.getMergeRuleList();
+		// readMergeRules();
+
 		if (_dirMergeFilename != null
 				&& (new File(_dirname + "/" + _dirMergeFilename)).exists()) {
 			// merge local filter rule file
@@ -58,11 +72,19 @@ public class FilterRuleConfiguration {
 	public void readRule(String plainRule) throws ArgumentParsingError {
 
 		String[] splittedRule = plainRule.split("\\s+");
+		
+		if (splittedRule.length == 1 && (splittedRule[0].startsWith("!") || splittedRule[0].startsWith("clear"))) {
+			// LIST-CLEARING FILTER RULE
+			_localRuleList = new FilterRuleList();
+			_parentRuleConfiguration = null;
+			return;
+		}
+		
 		if (splittedRule.length != 2) {
 			throw new ArgumentParsingError(
 					String.format(
-							"failed to parse filter rule '%s', invalid format: should be '<+|-|merge|dir-merge>,<modifier> <filename|path-expression>' in %s",
-							plainRule, _dirname));
+							"failed to parse filter rule '%s', invalid format: should be '<+|-|merge|dir-merge>,<modifier> <filename|path-expression>'",
+							plainRule));
 		}
 
 		Modifier m = readModifiers(splittedRule[0].trim(), plainRule);
@@ -76,13 +98,16 @@ public class FilterRuleConfiguration {
 
 			if (m._merge == true) {
 
+				// _mergeRuleList.add(new MergeRule(m, splittedRule[1].trim()));
+
 				try (BufferedReader br = new BufferedReader(new FileReader(
-						_dirname + "/" + splittedRule[1].trim()))) {
+						splittedRule[1].trim()))) {
 					String line = br.readLine();
 					while (line != null) {
 						line = line.trim();
 						// ignore empty lines or comments
 						if (line.length() != 0 && !line.startsWith("#")) {
+
 							if (m._exclude == true) {
 								_localRuleList.addRule("- " + line);
 							} else if (m._include == true) {
@@ -95,8 +120,8 @@ public class FilterRuleConfiguration {
 					}
 				} catch (IOException e) {
 					throw new ArgumentParsingError(String.format(
-							"impossible to parse filter file '%s' for %s",
-							splittedRule[1], _dirname));
+							"impossible to parse filter file '%s'",
+							splittedRule[1]));
 				}
 
 				return;
@@ -125,27 +150,87 @@ public class FilterRuleConfiguration {
 				plainRule));
 	}
 
+	// FSTODO: korrigieren, dir-merge müsste zur Laufzeit akt. werden, nicht 'merge' ?
+	/* public void readMergeRules() throws ArgumentParsingError {
+		
+		for (MergeRule mergeRule : _mergeRuleList) {
+	
+			try (BufferedReader br = new BufferedReader(new FileReader(
+					_dirname + "/" + mergeRule._filename))) {
+				String line = br.readLine();
+				while (line != null) {
+					line = line.trim();
+					// ignore empty lines or comments
+					if (line.length() != 0 && !line.startsWith("#")) {
+						if (mergeRule._modifier._exclude == true) {
+							_localRuleList.addRule("- " + line);
+						} else if (mergeRule._modifier._include == true) {
+							_localRuleList.addRule("+ " + line);
+						} else {
+							readRule(line);
+						}
+					}
+					line = br.readLine();
+				}
+			} catch (IOException e) {
+				throw new ArgumentParsingError(String.format(
+						"impossible to parse filter file '%s' for %s",
+						mergeRule._filename, _dirname));
+			}
+		}
+	} */
+
 	public boolean include(String filename, boolean isDirectory) {
+		
+		assureDirectoryPathname(filename, isDirectory);
 
 		if (_localRuleList.include(filename, isDirectory)) {
 			return true;
 		}
 
-		if (_parentRuleConfiguration != null) {
-
-			// search root and check against root only
-			FilterRuleConfiguration parent = this;
-			while (parent.getParentRuleConfiguration() != null) {
-				parent = parent.getParentRuleConfiguration();
-				if (parent.isInheritance()) {
-					if (parent.include(filename, isDirectory)) {
-						return true;
-					}
+		// search root and check against root only
+		FilterRuleConfiguration parent = this;
+		while (parent.getParentRuleConfiguration() != null) {
+			parent = parent.getParentRuleConfiguration();
+			if (parent.isInheritance()) {
+				if (parent.include(filename, isDirectory)) {
+					return true;
 				}
 			}
 		}
 
 		return false;
+	}
+	
+	public boolean exclude(String filename, boolean isDirectory) {
+
+		filename = assureDirectoryPathname(filename, isDirectory);
+		
+		if (_localRuleList.exclude(filename, isDirectory)) {
+			return true;
+		}
+
+		// search root and check against root only
+		FilterRuleConfiguration parent = this;
+		while (parent.getParentRuleConfiguration() != null) {
+			parent = parent.getParentRuleConfiguration();
+			if (parent.isInheritance()) {
+				if (parent.exclude(filename, isDirectory)) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+	
+	private String assureDirectoryPathname(String filename, boolean isDirectory) {
+		
+		if (!isDirectory) return filename;
+		if (isDirectory && !filename.endsWith("/")) {
+			return filename + "/";
+		}
+		return filename;
 	}
 
 	public FilterRuleConfiguration getParentRuleConfiguration() {
@@ -159,6 +244,10 @@ public class FilterRuleConfiguration {
 	public String getDirMergeFilename() {
 		return _dirMergeFilename;
 	}
+	
+	/* public List<MergeRule> getMergeRuleList() {
+		return _mergeRuleList;
+	} */
 
 	// see http://rsync.samba.org/ftp/rsync/rsync.html --> MERGE-FILE FILTER
 	// RULES
@@ -238,6 +327,22 @@ public class FilterRuleConfiguration {
 
 		return m;
 	}
+	
+	/* public void setFilterRuleList(FilterRuleList localRuleList) {
+		this._localRuleList = localRuleList;
+	} */
+	
+	public FilterRuleList getFilterRuleList() {
+		return _localRuleList;
+	}
+
+	public boolean isFilterAvailable() {
+		boolean result = _localRuleList._rules.size() > 0;
+		if (!result && _inheritance && _parentRuleConfiguration!=null) {
+			result = _parentRuleConfiguration.isFilterAvailable();
+		}
+		return result;
+	}
 
 	private class Modifier {
 		boolean _include;
@@ -256,5 +361,33 @@ public class FilterRuleConfiguration {
 								FilterRuleConfiguration.this._dirname));
 			}
 		}
+	}
+	
+	/* private class MergeRule {
+		Modifier _modifier;
+		String _filename;
+
+		public MergeRule(Modifier modifier, String filename) {
+			_modifier = modifier;
+			_filename = filename;
+		}
+	} */
+
+	public String toString() {
+		
+		StringBuilder buf = new StringBuilder();
+		
+		buf.append("dir=").append(_dirname).append("; ");
+		buf.append("rules=[").append(_localRuleList.toString()).append("]; ");
+		buf.append("inheritance=").append(new Boolean(_inheritance).toString()).append("; ");
+		if (_dirMergeFilename!=null) {
+			buf.append("dirMergeFilename=").append(_dirMergeFilename).append("; ");
+		}
+
+		if (_parentRuleConfiguration!=null) {
+			buf.append("parent=").append(_parentRuleConfiguration.toString());
+		}
+		
+		return buf.toString();
 	}
 }

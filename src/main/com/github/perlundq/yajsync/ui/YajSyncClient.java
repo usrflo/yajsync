@@ -248,7 +248,9 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
     private boolean _isShowStatistics;
     private int _remotePort = Consts.DEFAULT_LISTEN_PORT;
     private int _verbosity = 0;
-    private final List<String> _srcArgs = new LinkedList<>();
+    private List<String> _inputFilterRules = new LinkedList<>();
+    private FilterRuleConfiguration _filterRuleConfiguration;
+    private List<String> _srcArgs = new LinkedList<>();
     private Statistics _statistics;
     private String _address;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
@@ -492,6 +494,46 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                 }
             }
         }));
+        
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "filter", "f", "add a file-filtering RULE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add((String) option.getValue());
+                    }}));
+        
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "exclude", "", "exclude files matching PATTERN",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add("- " + (String) option.getValue());
+                    }}));
+        
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "exclude-from", "", "read exclude patterns from FILE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add("merge,- " + (String) option.getValue());
+                    }}));
+        
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "include", "", "don't exclude files matching PATTERN",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add("+ " + (String) option.getValue());
+                    }}));
+        
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                       	"include-from", "", "read list of source-file names from FILE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add("merge,+ " + (String) option.getValue());
+                    }}));
 
         return options;
     }
@@ -623,6 +665,9 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             } else {
                 parseUnnamedArgs(argsParser.getUnnamedArguments());
             }
+            
+            _filterRuleConfiguration = new FilterRuleConfiguration(_inputFilterRules);
+            
         } catch (ArgumentParsingError e) {
             _err.println(e.getMessage());
             _err.println(argsParser.toUsageString());
@@ -671,6 +716,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         session.setIsPreserveUser(_isPreserveUser);
         session.setIsIgnoreTimes(_isIgnoreTimes);
         session.setIsRecursiveTransfer(_isRecursiveTransfer);
+        session.setFilterRuleConfiguration(_filterRuleConfiguration);
         session.setIsSender(_isSender);
         session.setIsTransferDirs(_isTransferDirs);
 
@@ -743,6 +789,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         localTransfer.setIsIgnoreTimes(_isIgnoreTimes);
         localTransfer.setIsDeferredWrite(_isDeferredWrite);
         localTransfer.setIsTransferDirs(_isTransferDirs);
+        // FSTODO: session.setFilterRuleConfiguration(_filterRuleConfiguration);
         List<Path> srcPaths = new LinkedList<>();
         for (String pathName : _srcArgs) {
             srcPaths.add(CustomFileSystem.getPath(pathName));                                  // throws InvalidPathException

@@ -50,11 +50,28 @@ public class FilterRuleList {
 
 		return false;
 	}
+	
+	public boolean exclude(String filename, boolean isDirectory) {
+
+		for (FilterRule rule : _rules) {
+
+			if (!isDirectory && rule.isDirectoryOnly())
+				continue;
+
+			boolean matches = rule.matches(filename);
+
+			if (matches) {
+				return !rule.isInclusion();
+			}
+		}
+
+		return false;
+	}
 
 	/*
 	 * see http://rsync.samba.org/ftp/rsync/rsync.html --> FILTER RULES
 	 */
-	private class FilterRule {
+	public class FilterRule {
 
 		private boolean _inclusion;
 		private boolean _directoryOnly;
@@ -143,9 +160,21 @@ public class FilterRuleList {
 			} else {
 				// string matching
 				if (_absoluteMatching) {
-					_result = filename.startsWith(_path);
+					if (filename.length()<_path.length()) {
+						// no matching if filename is shorter than _path
+						_result = false;
+					} else if (filename.length()==_path.length()) {
+						// matching if filename equals _path
+						_result = filename.startsWith(_path);
+					} else if (filename.charAt(_path.length())=='/') {
+						// matching if filename is contained in _path
+						_result = filename.startsWith(_path);
+					} else {
+						_result = false;
+					}
 				} else {
-					_result = filename.contains(_path);
+					// tail matching
+					_result = filename.endsWith("/"+_path);
 				}
 			}
 
@@ -175,5 +204,14 @@ public class FilterRuleList {
 
 			return buf.toString();
 		}
+	}
+	
+	public String toString() {
+		
+		StringBuilder buf = new StringBuilder();
+		for (FilterRule rule : _rules) {
+			buf.append(rule).append("; ");
+		}
+		return buf.toString();
 	}
 }

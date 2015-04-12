@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutorService;
 import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.session.ClientSessionConfig.AuthProvider;
 import com.github.perlundq.yajsync.text.Text;
+import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
 
 public class RsyncClientSession
 {
@@ -39,6 +40,7 @@ public class RsyncClientSession
     private boolean _isPreserveTimes;
     private boolean _isRecursiveTransfer;
     private boolean _isSender;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
     private int _verbosity;
     private Statistics _statistics = new Statistics();
@@ -101,6 +103,12 @@ public class RsyncClientSession
     {
         _isSender = isSender;
         return this;
+    }
+    
+    public RsyncClientSession setFilterRuleConfiguration(
+    		FilterRuleConfiguration filterRuleConfiguration) {
+    	_filterRuleConfiguration = filterRuleConfiguration;
+    	return this;
     }
 
     public RsyncClientSession setIsTransferDirs(boolean isTransferDirs)
@@ -215,7 +223,8 @@ public class RsyncClientSession
                 setIsRecursive(_isRecursiveTransfer).
                 setIsPreserveUser(_isPreserveUser).
                 setIsInterruptible(isChannelsInterruptible).
-                setIsSafeFileList(cfg.isSafeFileList());
+                setIsSafeFileList(cfg.isSafeFileList()).
+                setFilterRuleConfiguration(_filterRuleConfiguration);
             boolean isTransferDirs = _isTransferDirs ||
                                      _isModuleListing && !_isRecursiveTransfer;
             sender.setIsTransferDirs(isTransferDirs);
@@ -237,6 +246,7 @@ public class RsyncClientSession
                     setIsInterruptible(isChannelsInterruptible);
             Receiver receiver = new Receiver(generator, in, _charset, dstArg).
                 setIsSendFilterRules(true).
+                setFilterRuleConfiguration(_filterRuleConfiguration).
                 setIsReceiveStatistics(true).
                 setIsExitEarlyIfEmptyList(true).
                 setIsRecursive(_isRecursiveTransfer).

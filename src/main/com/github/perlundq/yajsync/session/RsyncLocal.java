@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 
 import com.github.perlundq.yajsync.text.Text;
+import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
 import com.github.perlundq.yajsync.util.BitOps;
 
 public class RsyncLocal
@@ -37,6 +38,7 @@ public class RsyncLocal
     private boolean _isPreserveUser;
     private boolean _isIgnoreTimes;
     private boolean _isDeferredWrite;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
     private Statistics _statistics = new Statistics();
     private boolean _isTransferDirs = false;
@@ -94,6 +96,11 @@ public class RsyncLocal
         _isTransferDirs = isTransferDirs;
     }
 
+    public void setFilterRuleConfiguration(
+    		FilterRuleConfiguration filterRuleConfiguration) {
+		_filterRuleConfiguration = filterRuleConfiguration;
+	}
+
     private Pipe[] pipePair()
     {
         try {
@@ -126,6 +133,7 @@ public class RsyncLocal
             setIsPreserveUser(_isPreserveUser).
             setIsExitEarlyIfEmptyList(true).
             setIsRecursive(_isRecursiveTransfer).
+            setFilterRuleConfiguration(_filterRuleConfiguration).
             setIsTransferDirs(isTransferDirs);
         Generator generator = new Generator(toSender.sink(), _charset,
                                             checksumSeed, out).
