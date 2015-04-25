@@ -248,9 +248,9 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
     private boolean _isShowStatistics;
     private int _remotePort = Consts.DEFAULT_LISTEN_PORT;
     private int _verbosity = 0;
-    private List<String> _inputFilterRules = new LinkedList<>();
+    private final List<String> _inputFilterRules = new LinkedList<>();
     private FilterRuleConfiguration _filterRuleConfiguration;
-    private List<String> _srcArgs = new LinkedList<>();
+    private final List<String> _srcArgs = new LinkedList<>();
     private Statistics _statistics;
     private String _address;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
@@ -494,7 +494,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                 }
             }
         }));
-        
+
         options.add(
                 Option.newStringOption(Option.Policy.OPTIONAL,
                                         "filter", "f", "add a file-filtering RULE",
@@ -502,7 +502,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                     @Override public void handleAndContinue(Option option) {
                     	_inputFilterRules.add((String) option.getValue());
                     }}));
-        
+
         options.add(
                 Option.newStringOption(Option.Policy.OPTIONAL,
                                         "exclude", "", "exclude files matching PATTERN",
@@ -510,7 +510,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                     @Override public void handleAndContinue(Option option) {
                     	_inputFilterRules.add("- " + (String) option.getValue());
                     }}));
-        
+
         options.add(
                 Option.newStringOption(Option.Policy.OPTIONAL,
                                         "exclude-from", "", "read exclude patterns from FILE",
@@ -518,7 +518,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                     @Override public void handleAndContinue(Option option) {
                     	_inputFilterRules.add("merge,- " + (String) option.getValue());
                     }}));
-        
+
         options.add(
                 Option.newStringOption(Option.Policy.OPTIONAL,
                                         "include", "", "don't exclude files matching PATTERN",
@@ -526,7 +526,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                     @Override public void handleAndContinue(Option option) {
                     	_inputFilterRules.add("+ " + (String) option.getValue());
                     }}));
-        
+
         options.add(
                 Option.newStringOption(Option.Policy.OPTIONAL,
                                        	"include-from", "", "read list of source-file names from FILE",
@@ -665,9 +665,9 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             } else {
                 parseUnnamedArgs(argsParser.getUnnamedArguments());
             }
-            
+
             _filterRuleConfiguration = new FilterRuleConfiguration(_inputFilterRules);
-            
+
         } catch (ArgumentParsingError e) {
             _err.println(e.getMessage());
             _err.println(argsParser.toUsageString());

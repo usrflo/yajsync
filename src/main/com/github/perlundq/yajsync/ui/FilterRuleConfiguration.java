@@ -72,14 +72,14 @@ public class FilterRuleConfiguration {
 	public void readRule(String plainRule) throws ArgumentParsingError {
 
 		String[] splittedRule = plainRule.split("\\s+");
-		
+
 		if (splittedRule.length == 1 && (splittedRule[0].startsWith("!") || splittedRule[0].startsWith("clear"))) {
 			// LIST-CLEARING FILTER RULE
 			_localRuleList = new FilterRuleList();
 			_parentRuleConfiguration = null;
 			return;
 		}
-		
+
 		if (splittedRule.length != 2) {
 			throw new ArgumentParsingError(
 					String.format(
@@ -152,9 +152,9 @@ public class FilterRuleConfiguration {
 
 	// FSTODO: korrigieren, dir-merge müsste zur Laufzeit akt. werden, nicht 'merge' ?
 	/* public void readMergeRules() throws ArgumentParsingError {
-		
+
 		for (MergeRule mergeRule : _mergeRuleList) {
-	
+
 			try (BufferedReader br = new BufferedReader(new FileReader(
 					_dirname + "/" + mergeRule._filename))) {
 				String line = br.readLine();
@@ -181,7 +181,7 @@ public class FilterRuleConfiguration {
 	} */
 
 	public boolean include(String filename, boolean isDirectory) {
-		
+
 		assureDirectoryPathname(filename, isDirectory);
 
 		if (_localRuleList.include(filename, isDirectory)) {
@@ -201,11 +201,11 @@ public class FilterRuleConfiguration {
 
 		return false;
 	}
-	
+
 	public boolean exclude(String filename, boolean isDirectory) {
 
 		filename = assureDirectoryPathname(filename, isDirectory);
-		
+
 		if (_localRuleList.exclude(filename, isDirectory)) {
 			return true;
 		}
@@ -223,9 +223,9 @@ public class FilterRuleConfiguration {
 
 		return false;
 	}
-	
+
 	private String assureDirectoryPathname(String filename, boolean isDirectory) {
-		
+
 		if (!isDirectory) return filename;
 		if (isDirectory && !filename.endsWith("/")) {
 			return filename + "/";
@@ -244,7 +244,7 @@ public class FilterRuleConfiguration {
 	public String getDirMergeFilename() {
 		return _dirMergeFilename;
 	}
-	
+
 	/* public List<MergeRule> getMergeRuleList() {
 		return _mergeRuleList;
 	} */
@@ -327,11 +327,11 @@ public class FilterRuleConfiguration {
 
 		return m;
 	}
-	
+
 	/* public void setFilterRuleList(FilterRuleList localRuleList) {
 		this._localRuleList = localRuleList;
 	} */
-	
+
 	public FilterRuleList getFilterRuleList() {
 		return _localRuleList;
 	}
@@ -362,7 +362,7 @@ public class FilterRuleConfiguration {
 			}
 		}
 	}
-	
+
 	/* private class MergeRule {
 		Modifier _modifier;
 		String _filename;
@@ -373,10 +373,11 @@ public class FilterRuleConfiguration {
 		}
 	} */
 
+	@Override
 	public String toString() {
-		
+
 		StringBuilder buf = new StringBuilder();
-		
+
 		buf.append("dir=").append(_dirname).append("; ");
 		buf.append("rules=[").append(_localRuleList.toString()).append("]; ");
 		buf.append("inheritance=").append(new Boolean(_inheritance).toString()).append("; ");
@@ -387,7 +388,7 @@ public class FilterRuleConfiguration {
 		if (_parentRuleConfiguration!=null) {
 			buf.append("parent=").append(_parentRuleConfiguration.toString());
 		}
-		
+
 		return buf.toString();
 	}
 }

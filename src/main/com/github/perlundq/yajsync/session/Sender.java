@@ -661,7 +661,7 @@ public class Sender implements RsyncTask,MessageHandler
                     _characterEncoder.encode(p.getFileName().toString());       // throws TextConversionException
 
                 FileInfo fileInfo = new FileInfo(p, p.getFileName(), nameBytes, attrs);          // throws IllegalArgumentException but that cannot happen
-                if (builder.contains(fileInfo)) { // O(n) not a problem unless a really large initial list of files
+                if (builder.contains(fileInfo)) {
                     if (_log.isLoggable(Level.WARNING)) {
                         _log.warning("pruning duplicate " + fileInfo);
                     }
