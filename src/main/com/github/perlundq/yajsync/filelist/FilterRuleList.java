@@ -50,7 +50,7 @@ public class FilterRuleList {
 
 		return false;
 	}
-	
+
 	public boolean exclude(String filename, boolean isDirectory) {
 
 		for (FilterRule rule : _rules) {
@@ -83,9 +83,9 @@ public class FilterRuleList {
 
 		/*
 		 * @formatter:off
-		 * 
+		 *
 		 * Input samples: + /some/path/this-file-is-found + *.csv - * + !/.svn/
-		 * 
+		 *
 		 * @formatter:on
 		 */
 
@@ -158,23 +158,26 @@ public class FilterRuleList {
 			if (_patternMatching) {
 				_result = _pattern.matcher(filename).matches();
 			} else {
+
+				String path = _path + (_directoryOnly ? "/":"");
+
 				// string matching
 				if (_absoluteMatching) {
-					if (filename.length()<_path.length()) {
+					if (filename.length()<path.length()) {
 						// no matching if filename is shorter than _path
 						_result = false;
-					} else if (filename.length()==_path.length()) {
+					} else if (filename.length()==path.length()) {
 						// matching if filename equals _path
-						_result = filename.startsWith(_path);
-					} else if (filename.charAt(_path.length())=='/') {
+						_result = filename.startsWith(path);
+					} else if (filename.charAt(path.length())=='/') {
 						// matching if filename is contained in _path
-						_result = filename.startsWith(_path);
+						_result = filename.startsWith(path);
 					} else {
 						_result = false;
 					}
 				} else {
 					// tail matching
-					_result = filename.endsWith("/"+_path);
+					_result = filename.endsWith("/"+path);
 				}
 			}
 
@@ -189,6 +192,7 @@ public class FilterRuleList {
 			return _directoryOnly;
 		}
 
+		@Override
 		public String toString() {
 			StringBuilder buf = new StringBuilder();
 			buf.append(_inclusion ? "+" : "-").append(" ");
@@ -199,15 +203,16 @@ public class FilterRuleList {
 				buf.append(_path);
 			}
 			if (_directoryOnly) {
-				buf.append(" (directory only)");
+				buf.append("/");
 			}
 
 			return buf.toString();
 		}
 	}
-	
+
+	@Override
 	public String toString() {
-		
+
 		StringBuilder buf = new StringBuilder();
 		for (FilterRule rule : _rules) {
 			buf.append(rule).append("; ");
