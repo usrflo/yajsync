@@ -18,8 +18,13 @@
  */
 package com.github.perlundq.yajsync.util;
 
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -200,5 +205,31 @@ public final class PathOps
             return CustomFileSystem.getPath(name + Text.DOT);
         }
         return CustomFileSystem.getPath(name);
+    }
+
+    public static void deleteIfExists(Path path) throws IOException {
+
+    	if (!Files.exists(path)) {
+    		return;
+    	}
+
+    	if (Files.isDirectory(path)) {
+	    	Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+	    		   @Override
+	    		   public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+	    			   Files.delete(file);
+	    			   return FileVisitResult.CONTINUE;
+	    		   }
+
+	    		   @Override
+	    		   public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+	    			   Files.delete(dir);
+	    			   return FileVisitResult.CONTINUE;
+	    		   }
+
+	    	});
+    	}
+
+    	Files.deleteIfExists(path);
     }
 }
