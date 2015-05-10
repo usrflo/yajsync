@@ -813,7 +813,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         localTransfer.setIsIgnoreTimes(_isIgnoreTimes);
         localTransfer.setIsDeferredWrite(_isDeferredWrite);
         localTransfer.setIsTransferDirs(_isTransferDirs);
-        // FSTODO: session.setFilterRuleConfiguration(_filterRuleConfiguration);
+        localTransfer.setFilterRuleConfiguration(_filterRuleConfiguration);
         List<Path> srcPaths = new LinkedList<>();
         for (String pathName : _srcArgs) {
             srcPaths.add(CustomFileSystem.getPath(pathName));                                  // throws InvalidPathException

@@ -480,7 +480,11 @@ public class Receiver implements RsyncTask,MessageHandler
                         return CustomFileSystem.getPath(stubs.get(0)._pathName);
                     }
                     @Override public Path relativePathOf(Path fullPath) {
-                    	return targetPath.relativize(fullPath).normalize();
+                    	Path relativePath = targetPath.relativize(fullPath);
+                		if (!relativePath.equals(PathOps.EMPTY)) {
+                			return relativePath.normalize();
+                		}
+                		return relativePath;
                     }
                     @Override public Path fullPathOf(Path relativePath) {
                         return targetPath;
@@ -1643,6 +1647,10 @@ public class Receiver implements RsyncTask,MessageHandler
     public int deleteUnmatchedFiles(Filelist.SegmentBuilder builder, Path path) {
 
     	int ioError = 0;
+
+    	if ((!_isDelete && !_isDeleteExcluded) || !Files.isDirectory(path) || !Files.exists(path)) {
+    		return ioError;
+    	}
 
     	if (_log.isLoggable(Level.FINE)) {
     		_log.fine(String.format("delete unmatched files in dir %s", path));
