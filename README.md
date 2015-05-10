@@ -20,6 +20,20 @@ Currently implemented rsync options:
 
 - Don't skip files that match size and time (-I, --ignore-times)
 
+- Add a file-filtering RULE (-f, --filter)
+
+- Exclude files matching PATTERN (--exclude)
+
+- Read exclude patterns from FILE (--exclude-from)
+
+- Don't exclude files matching PATTERN (--include)
+
+- Read list of source-file names from FILE (--include-from)
+
+- Delete extraneous files from dest dirs (--delete)
+
+- Delete excluded files from dest dirs (--delete-excluded)
+
 - Read daemon-access password from FILE (--password-file=FILE) or environment variable RSYNC_PASSWORD
 
 - Module file listings
