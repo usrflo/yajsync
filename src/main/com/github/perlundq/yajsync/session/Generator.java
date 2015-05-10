@@ -58,6 +58,7 @@ import com.github.perlundq.yajsync.text.TextDecoder;
 import com.github.perlundq.yajsync.text.TextEncoder;
 import com.github.perlundq.yajsync.util.FileOps;
 import com.github.perlundq.yajsync.util.MD5;
+import com.github.perlundq.yajsync.util.PathOps;
 import com.github.perlundq.yajsync.util.Rolling;
 import com.github.perlundq.yajsync.util.RuntimeInterruptException;
 import com.github.perlundq.yajsync.util.Util;
@@ -961,8 +962,7 @@ public class Generator implements RsyncTask
     {
         if (existingAttrs != null &&
             existingAttrs.fileType() != fileInfo.attrs().fileType()) {
-            // TODO: BUG: this won't properly delete non-empty directories
-            Files.deleteIfExists(fileInfo.path());
+        	PathOps.deleteIfExists(fileInfo.path());
             return true;
         } else {
             return false;
