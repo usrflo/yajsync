@@ -46,6 +46,8 @@ public class RsyncClientSession
     private Statistics _statistics = new Statistics();
     private boolean _isPreservePermissions;
     private boolean _isPreserveUser;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
     private boolean _isIgnoreTimes;
     private boolean _isTransferDirs;
 
@@ -104,7 +106,19 @@ public class RsyncClientSession
         _isSender = isSender;
         return this;
     }
-    
+
+    public RsyncClientSession setIsDelete(boolean isDelete)
+    {
+        _isDelete = isDelete;
+        return this;
+    }
+
+    public RsyncClientSession setIsDeleteExcluded(boolean isDeleteExcluded)
+    {
+        _isDeleteExcluded = isDeleteExcluded;
+        return this;
+    }
+
     public RsyncClientSession setFilterRuleConfiguration(
     		FilterRuleConfiguration filterRuleConfiguration) {
     	_filterRuleConfiguration = filterRuleConfiguration;
@@ -163,6 +177,13 @@ public class RsyncClientSession
         sb.append("f");
         // revisit if we add support for --iconv
         serverArgs.add(sb.toString());
+
+        if (_isDelete) {
+        	serverArgs.add("--delete");
+        }
+        if (_isDeleteExcluded) {
+        	serverArgs.add("--delete-excluded");
+        }
 
         serverArgs.add("."); // arg delimiter
 
@@ -253,6 +274,8 @@ public class RsyncClientSession
                 setIsPreservePermissions(_isPreservePermissions).
                 setIsPreserveTimes(_isPreserveTimes).
                 setIsPreserveUser(_isPreserveUser).
+                setIsDelete(_isDelete).
+                setIsDeleteExcluded(_isDeleteExcluded).
                 setIsListOnly(_isModuleListing).
                 setIsDeferredWrite(_isDeferredWrite).
                 setIsInterruptible(isChannelsInterruptible).

@@ -48,6 +48,7 @@ import com.github.perlundq.yajsync.channels.RsyncInChannel;
 import com.github.perlundq.yajsync.channels.RsyncOutChannel;
 import com.github.perlundq.yajsync.filelist.FileInfo;
 import com.github.perlundq.yajsync.filelist.Filelist;
+import com.github.perlundq.yajsync.filelist.FilterRuleList;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
 import com.github.perlundq.yajsync.filelist.User;
 import com.github.perlundq.yajsync.io.CustomFileSystem;
@@ -222,15 +223,16 @@ public class Sender implements RsyncTask,MessageHandler
                 _log.fine("Sender.transfer:");
             }
             if (_isReceiveFilterRules) {
-            	// read remote filter rules
+            	// read remote filter rules if server
             	try {
 					filterRuleConfiguration = new FilterRuleConfiguration(receiveFilterRules());
 				} catch (ArgumentParsingError e) {
 					throw new RsyncProtocolException(e);
 				}
             } else {
-            	// read local filter rules
+            	// read local filter rules if client
             	filterRuleConfiguration = _filterRuleConfiguration;
+            	sendFilterRules();
             }
 
             long t1 = System.currentTimeMillis();
@@ -422,6 +424,28 @@ public class Sender implements RsyncTask,MessageHandler
     	} catch (TextConversionException e) {
     		throw new RsyncProtocolException(e);
         }
+    }
+
+    private void sendFilterRules() throws InterruptedException, ChannelException
+    {
+    	if (_filterRuleConfiguration.getFilterRuleList()._rules.size()>0) {
+
+    		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleList()._rules) {
+    			byte[] encodedRule = _characterEncoder.encode(rule.toString());
+
+    			ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
+    			buf.putInt(encodedRule.length);
+    			buf.put(encodedRule);
+    			buf.flip();
+    			_duplexChannel.put(buf);
+    		}
+    	}
+
+    	// send stop signal
+    	ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+        buf.putInt(0);
+        buf.flip();
+        _duplexChannel.put(buf);
     }
 
     private int sendFiles(Filelist fileList, Filelist.Segment firstSegment, FilterRuleConfiguration parentFilterRuleConfiguration)
@@ -726,6 +750,11 @@ public class Sender implements RsyncTask,MessageHandler
             return false;
 		}
         boolean filterByRules = localFilterRuleConfiguration.isFilterAvailable();
+
+        // do not send an excluded directory
+        if (filterByRules && localFilterRuleConfiguration.exclude(directory.path().toString(), Files.isDirectory(directory.path()))) {
+        	return isOK;
+        }
 
         // the JVM adds a lot of overhead when doing mostly directory traversals
         // and reading of file attributes

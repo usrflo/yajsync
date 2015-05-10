@@ -243,6 +243,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
     private boolean _isPreserveUser;
     private boolean _isIgnoreTimes;
     private boolean _isRecursiveTransfer;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
     private boolean _isRemote;
     private boolean _isSender;
     private boolean _isShowStatistics;
@@ -421,7 +423,25 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                                                         _isIgnoreTimes),
                 new Option.ContinuingHandler() {
                     @Override public void handleAndContinue(Option option) {
-                        _isIgnoreTimes  = true;
+                        _isIgnoreTimes = true;
+                    }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "delete", "",
+                                          String.format("delete extraneous files from dest dirs"),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        _isDelete = true;
+                    }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "delete-excluded", "",
+                                          String.format("also delete excluded files from dest dirs"),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        _isDeleteExcluded = true;
                     }}));
 
         options.add(
@@ -716,6 +736,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         session.setIsPreserveUser(_isPreserveUser);
         session.setIsIgnoreTimes(_isIgnoreTimes);
         session.setIsRecursiveTransfer(_isRecursiveTransfer);
+        session.setIsDelete(_isDelete);
+        session.setIsDeleteExcluded(_isDeleteExcluded);
         session.setFilterRuleConfiguration(_filterRuleConfiguration);
         session.setIsSender(_isSender);
         session.setIsTransferDirs(_isTransferDirs);
@@ -786,6 +808,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         localTransfer.setIsPreservePermissions(_isPreservePermissions);
         localTransfer.setIsPreserveTimes(_isPreserveTimes);
         localTransfer.setIsPreserveUser(_isPreserveUser);
+        localTransfer.setIsDelete(_isDelete);
+        localTransfer.setIsDeleteExcluded(_isDeleteExcluded);
         localTransfer.setIsIgnoreTimes(_isIgnoreTimes);
         localTransfer.setIsDeferredWrite(_isDeferredWrite);
         localTransfer.setIsTransferDirs(_isTransferDirs);

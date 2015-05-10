@@ -59,6 +59,8 @@ public class ServerSessionConfig extends SessionConfig
     private boolean _isPreservePermissions = false;
     private boolean _isPreserveTimes = false;
     private boolean _isPreserveUser = false;
+    private boolean _isDelete = false;
+    private boolean _isDeleteExcluded = false;
     private boolean _isIgnoreTimes = false;
     private Module _module;
     private int _verbosity = 0;
@@ -329,7 +331,23 @@ public class ServerSessionConfig extends SessionConfig
             "dirs", "d", "",
             new Option.ContinuingHandler() {
                 @Override public void handleAndContinue(Option option) {
-                _isTransferDirs = true;
+                	_isTransferDirs = true;
+                }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "delete", "", "",
+                new Option.ContinuingHandler() {
+                   @Override public void handleAndContinue(Option option) {
+                	   setIsDelete();
+                }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "delete-excluded", "", "",
+                new Option.ContinuingHandler() {
+                   @Override public void handleAndContinue(Option option) {
+                	   setIsDeleteExcluded();
                 }}));
 
         // FIXME: let ModuleProvider mutate this argsParser instance before
@@ -462,6 +480,16 @@ public class ServerSessionConfig extends SessionConfig
         _isPreserveUser = true;
     }
 
+    private void setIsDelete()
+    {
+        _isDelete = true;
+    }
+
+    private void setIsDeleteExcluded()
+    {
+        _isDeleteExcluded = true;
+    }
+
     private void setIsIgnoreTimes()
     {
         _isIgnoreTimes = true;
@@ -495,6 +523,14 @@ public class ServerSessionConfig extends SessionConfig
     public boolean isPreserveUser()
     {
         return _isPreserveUser;
+    }
+
+    public boolean isDelete() {
+    	return _isDelete;
+    }
+
+    public boolean isDeleteExcluded() {
+    	return _isDeleteExcluded;
     }
 
     public boolean isIgnoreTimes()

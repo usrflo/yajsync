@@ -25,6 +25,7 @@ import java.nio.ByteOrder;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.Charset;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
@@ -32,6 +33,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -58,6 +60,7 @@ import com.github.perlundq.yajsync.text.TextConversionException;
 import com.github.perlundq.yajsync.text.TextDecoder;
 import com.github.perlundq.yajsync.text.TextEncoder;
 import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
+import com.github.perlundq.yajsync.util.ArgumentParsingError;
 import com.github.perlundq.yajsync.util.Environment;
 import com.github.perlundq.yajsync.util.FileOps;
 import com.github.perlundq.yajsync.util.MD5;
@@ -102,6 +105,12 @@ public class Receiver implements RsyncTask,MessageHandler
         Path relativePathOf(String pathName);
 
         /**
+         * @throws InvalidPathException
+         * @throws RsyncSecurityException
+         */
+        Path relativePathOf(Path fullPath);
+
+        /**
          * @throws RsyncSecurityException
          */
         Path fullPathOf(Path relativePath);
@@ -132,6 +141,9 @@ public class Receiver implements RsyncTask,MessageHandler
     private boolean _isInterruptible = true;
     private boolean _isExitAfterEOF;
     private boolean _isSafeFileList = true;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
+    private final boolean _isDeleteBefore = true;	// default
     private int _ioError;
     private PathResolver _pathResolver;
 
@@ -209,6 +221,18 @@ public class Receiver implements RsyncTask,MessageHandler
         return this;
     }
 
+    public Receiver setIsDelete(boolean isDelete)
+    {
+        _isDelete = isDelete;
+        return this;
+    }
+
+    public Receiver setIsDeleteExcluded(boolean isDeleteExcluded)
+    {
+    	_isDeleteExcluded = isDeleteExcluded;
+        return this;
+    }
+
     public Receiver setIsExitAfterEOF(boolean isExitAfterEOF)
     {
         _isExitAfterEOF = isExitAfterEOF;
@@ -226,7 +250,7 @@ public class Receiver implements RsyncTask,MessageHandler
         _isSendFilterRules = isSendFilterRules;
         return this;
     }
-    
+
     public Receiver setFilterRuleConfiguration(FilterRuleConfiguration filterRuleConfiguration) {
     	_filterRuleConfiguration = filterRuleConfiguration;
     	return this;
@@ -268,21 +292,31 @@ public class Receiver implements RsyncTask,MessageHandler
         try {
             if (_log.isLoggable(Level.FINE)) {
                 _log.fine(String.format("Receiver.receive(targetPathName=%s, " +
-                                        "isDeferredWrite=%s," +
-                                        " isListOnly=%s, isPreserveTimes=%s, " +
+                                        "isDeferredWrite=%s, " +
+                                        "isListOnly=%s, isPreserveTimes=%s, " +
+                                        "isDelete=%s, isDeleteExcluded=%s, " +
                                         "isRecursive=%s, sendFilterRules=%s, " +
                                         "filterRules=%s, " +
                                         "receiveStatistics=%s, " +
                                         "exitEarlyIfEmptyList=%s",
                                         _targetPathName, _isDeferredWrite,
                                         _isListOnly, _isPreserveTimes,
+                                        _isDelete, _isDeleteExcluded,
                                         _isRecursive, _isSendFilterRules,
                                         _filterRuleConfiguration.getFilterRuleList()._rules,
                                         _isReceiveStatistics,
                                         _isExitEarlyIfEmptyList));
             }
             if (_isSendFilterRules) {
+            	// send filter rules if client
                 sendFilterRules();
+            } else {
+            	// receive filter rules if server
+            	try {
+					_filterRuleConfiguration = new FilterRuleConfiguration(receiveFilterRules());
+				} catch (ArgumentParsingError e) {
+					throw new RsyncProtocolException(e);
+				}
             }
 
             if (_isPreserveUser && _isRecursive) {
@@ -313,6 +347,10 @@ public class Receiver implements RsyncTask,MessageHandler
             _pathResolver = getPathResolver(targetPath, stubs);                 // throws PathResolverException
             Filelist.SegmentBuilder builder = new Filelist.SegmentBuilder(null);
             _ioError |= extractFileMetadata(stubs, builder);
+
+            if (_isDeleteBefore) {
+            	_ioError |= deleteUnmatchedFiles(builder, targetPath);
+            }
 
             Filelist fileList = new ConcurrentFilelist(_isRecursive);           // FIXME: move out
             _generator.setFileList(fileList);                                   // FIXME: move out
@@ -441,6 +479,9 @@ public class Receiver implements RsyncTask,MessageHandler
                     @Override public Path relativePathOf(String pathName) {
                         return CustomFileSystem.getPath(stubs.get(0)._pathName);
                     }
+                    @Override public Path relativePathOf(Path fullPath) {
+                    	return targetPath.relativize(fullPath).normalize();
+                    }
                     @Override public Path fullPathOf(Path relativePath) {
                         return targetPath;
                     }
@@ -460,6 +501,17 @@ public class Receiver implements RsyncTask,MessageHandler
                         Path normalizedRelativePath =
                             PathOps.normalizeStrict(relativePath);
                         return normalizedRelativePath;
+                    }
+                    @Override public Path relativePathOf(Path fullPath) {
+                    	try {
+                    		Path relativePath = targetPath.relativize(fullPath);
+                    		if (!relativePath.equals(PathOps.EMPTY)) {
+                    			return relativePath.normalize();
+                    		}
+                    		return relativePath;
+                    	} catch (Exception e) {
+                    		throw new RsyncSecurityException(targetPath + " vs. " + fullPath);
+                    	}
                     }
                     @Override public Path fullPathOf(Path relativePath) {
                         Path fullPath =
@@ -518,10 +570,10 @@ public class Receiver implements RsyncTask,MessageHandler
     private void sendFilterRules() throws InterruptedException
     {
     	if (_filterRuleConfiguration.getFilterRuleList()._rules.size()>0) {
-    		
+
     		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleList()._rules) {
     			byte[] encodedRule = _characterEncoder.encode(rule.toString());
-    			
+
     			ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
     			buf.putInt(encodedRule.length);
     			buf.put(encodedRule);
@@ -529,12 +581,34 @@ public class Receiver implements RsyncTask,MessageHandler
     	        _generator.sendBytes(buf);
     		}
     	}
-    	
+
     	// send stop signal
     	ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
         buf.putInt(0);
         buf.flip();
         _generator.sendBytes(buf);
+    }
+
+    /**
+     * @throws RsyncProtocolException if failing to decode the filter rules
+     */
+    private List<String> receiveFilterRules() throws ChannelException
+    {
+    	int numBytesToRead;
+    	List<String> list = new ArrayList<>();
+
+    	try {
+
+    		while ((numBytesToRead = _senderInChannel.getInt())>0 ) {
+                ByteBuffer buf = _senderInChannel.get(numBytesToRead);
+                list.add(_characterDecoder.decode(buf));
+    		}
+
+    		return list;
+
+    	} catch (TextConversionException e) {
+    		throw new RsyncProtocolException(e);
+        }
     }
 
     public Statistics statistics()
@@ -702,6 +776,11 @@ public class Receiver implements RsyncTask,MessageHandler
                 Filelist.SegmentBuilder builder =
                     new Filelist.SegmentBuilder(directory);
                 _ioError |= extractFileMetadata(stubs, builder);
+
+                if (_isDeleteBefore) {
+                	_ioError |= deleteUnmatchedFiles(builder, directory.path());
+                }
+
                 segment = fileList.newSegment(builder);
                 _generator.generateSegment(segment);
                 numSegmentsInProgress++;
@@ -1102,6 +1181,7 @@ public class Receiver implements RsyncTask,MessageHandler
             }
             /* NOTE: we must keep the file regardless of any errors, or else
              * we'll have mismatching file list with sender */
+            // TODO: pathNameBytes is not normalized, may be ./
             if (fileInfo == null) {
                 fileInfo = new FileInfo(null, null, pathNameBytes, attrs);
             }
@@ -1558,5 +1638,76 @@ public class Receiver implements RsyncTask,MessageHandler
         } catch (ChannelEOFException e) {
             // It's OK, we expect EOF without having received any data
         }
+    }
+
+    public int deleteUnmatchedFiles(Filelist.SegmentBuilder builder, Path path) {
+
+    	int ioError = 0;
+
+    	if (_log.isLoggable(Level.FINE)) {
+    		_log.fine(String.format("delete unmatched files in dir %s", path));
+    	}
+
+    	if (_ioError!=0 /* & IOERR_GENERAL && !ignore_errors */) {	// TODO
+//     		if (already_warned)
+//     			return;
+//     		rprintf(FINFO,
+//     			"IO error encountered -- skipping file deletion\n");
+//     		already_warned = 1;
+    		return ioError;
+    	}
+
+    	try {
+
+    		if (deleteUnmatchedFile(builder, path)) {
+    			return ioError;
+    		}
+
+    		try (DirectoryStream<Path> stream = Files.newDirectoryStream(path)) {
+	        	for (Path entry : stream) {
+	        		deleteUnmatchedFile(builder, entry);
+	        	}
+	    	}
+
+    	} catch (IOException e) {
+        	if (_log.isLoggable(Level.WARNING)) {
+            	_log.warning(String.format("Got I/O error during deletion of unmatched files " +
+                                           "of %s: %s",
+                                           path, e.getMessage()));
+            }
+        	ioError = IoError.GENERAL;
+        }
+
+        return ioError;
+    }
+
+    private boolean deleteUnmatchedFile(Filelist.SegmentBuilder builder, Path entry) throws IOException {
+
+		Path relativePath = _pathResolver.relativePathOf(entry);
+		if (relativePath.equals(PathOps.EMPTY)) {
+			// don't delete the relative root directory
+			return false;
+		}
+
+        String relativePathName = Text.withSlashAsPathSepator(relativePath.toString());
+        byte[] pathNameBytes = _characterEncoder.encodeOrNull(relativePathName);
+        if (pathNameBytes != null) {
+            FileInfo fileInfo = new FileInfo(entry, relativePath,
+                                       pathNameBytes, RsyncFileAttributes.stat(entry));
+
+            // detect exclusion, TODO: check path conversion
+            boolean isEntryExcluded = _filterRuleConfiguration.getFilterRuleList().exclude("/"+relativePathName, Files.isDirectory(entry));
+
+            if (!isEntryExcluded && _isDelete && !builder.contains(fileInfo)) {
+            	PathOps.deleteIfExists(fileInfo.path());
+            	return true;
+    		}
+    		else if (isEntryExcluded && _isDeleteExcluded) {
+    			PathOps.deleteIfExists(fileInfo.path());
+    			return true;
+    		}
+        }
+
+        return false;
     }
 }

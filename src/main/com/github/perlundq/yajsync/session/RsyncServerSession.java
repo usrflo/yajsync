@@ -91,6 +91,8 @@ public class RsyncServerSession
                     setIsPreservePermissions(cfg.isPreservePermissions()).
                     setIsPreserveTimes(cfg.isPreserveTimes()).
                     setIsPreserveUser(cfg.isPreserveUser()).
+                    setIsDelete(cfg.isDelete()).
+                    setIsDeleteExcluded(cfg.isDeleteExcluded()).
                     setIsDeferredWrite(_isDeferredWrite).
                     setIsInterruptible(isChannelsInterruptible).
                     setIsSafeFileList(cfg.isSafeFileList());

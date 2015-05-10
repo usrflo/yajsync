@@ -36,6 +36,8 @@ public class RsyncLocal
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
     private boolean _isPreserveUser;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
     private boolean _isIgnoreTimes;
     private boolean _isDeferredWrite;
     private FilterRuleConfiguration _filterRuleConfiguration;
@@ -79,6 +81,16 @@ public class RsyncLocal
     public void setIsPreserveUser(boolean isPreserveUser)
     {
         _isPreserveUser = isPreserveUser;
+    }
+
+    public void setIsDelete(boolean isDelete)
+    {
+        _isDelete = isDelete;
+    }
+
+    public void setIsDeleteExcluded(boolean isDeleteExcluded)
+    {
+    	_isDeleteExcluded = isDeleteExcluded;
     }
 
     public void setIsIgnoreTimes(boolean isIgnoreTimes)
@@ -153,6 +165,8 @@ public class RsyncLocal
             setIsPreservePermissions(_isPreservePermissions).
             setIsPreserveTimes(_isPreserveTimes).
             setIsPreserveUser(_isPreserveUser).
+            setIsDelete(_isDelete).
+            setIsDeleteExcluded(_isDeleteExcluded).
             setIsListOnly(_isModuleListing).
             setIsDeferredWrite(_isDeferredWrite);
 
