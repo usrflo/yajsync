@@ -562,6 +562,115 @@ public class SystemTest
     }
 
     @Test
+    public void testClientDirCopyDstDeletion() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 2;
+        long fileSize = FileUtil.du(srcFile1, srcFile2);
+
+        Files.createDirectory(dst);
+        Path dstDir1 = dst.resolve("dir.remove");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1.remove");
+        FileUtil.writeToFiles(10, dstFile1);
+        Path dstFile2 = dst.resolve("file2.remove");
+        FileUtil.writeToFiles(9, dstFile2);
+
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientDirCopyExcluded() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile1);
+
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--exclude=file2");
+
+        Files.deleteIfExists(srcFile2);
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientDirCopyDstDeleteExcluded() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile2);
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir1 = copyOfSrc.resolve("dir");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1");
+        FileUtil.writeToFiles(9, dstFile1);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete-excluded", "--exclude=file1");
+
+        Files.deleteIfExists(srcFile1);
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
     public void testCopyFileMultipleBlockSize() throws IOException
     {
         Path src = _tempDir.newFile().toPath();
@@ -739,7 +848,7 @@ public class SystemTest
 
   // FIXME: latch might not get decreased if exception occurs
   // FIXME: port might be unavailable, open it here and inject it
-  @Test(timeout=300)
+  @Test(timeout=500)
   public void testProtectedServerConnection() throws InterruptedException, IOException
   {
       final CountDownLatch isListeningLatch = new CountDownLatch(1);
