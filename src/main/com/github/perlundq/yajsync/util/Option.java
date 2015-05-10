@@ -138,13 +138,14 @@ public class Option
                         "%s expects an argument%nExample: %s",
                         name(), exampleUsageToString()));
                 }
-                _value = str;
+                _value = str.replaceAll("^\"|\"$", "");
             } else if (_type == Path.class) {
                 if (str.isEmpty()) {
                     throw new ArgumentParsingError(String.format(
                         "%s expects an argument%nExample: %s",
                         name(), exampleUsageToString()));
                 }
+                str = str.replaceAll("^\"|\"$", "");
                 Path path = Paths.get(str);
                 if (!Files.exists(path)) {
                     throw new ArgumentParsingError(String.format(
