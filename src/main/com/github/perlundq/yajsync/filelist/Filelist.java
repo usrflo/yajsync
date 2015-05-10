@@ -90,7 +90,7 @@ public class Filelist
         // O(log n) by SortedList
         public boolean contains(FileInfo fileInfo)
         {
-            return _files.contains(fileInfo);
+            return _files.containsElement(fileInfo);
         }
 
         private void clear()
