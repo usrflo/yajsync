@@ -101,7 +101,7 @@ public class FilterRuleConfiguration {
 				// _mergeRuleList.add(new MergeRule(m, splittedRule[1].trim()));
 
 				try (BufferedReader br = new BufferedReader(new FileReader(
-						splittedRule[1].trim()))) {
+						_dirname + "/" + splittedRule[1].trim()))) {
 					String line = br.readLine();
 					while (line != null) {
 						line = line.trim();
