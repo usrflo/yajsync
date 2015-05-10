@@ -73,12 +73,12 @@ public class FilterRuleList {
 	 */
 	public class FilterRule {
 
-		private boolean _inclusion;
-		private boolean _directoryOnly;
-		private boolean _absoluteMatching;
-		private boolean _negateMatching;
-		private boolean _patternMatching;
-		private String _path;
+		private final boolean _inclusion;
+		private final boolean _directoryOnly;
+		private final boolean _absoluteMatching;
+		private final boolean _negateMatching;
+		private final boolean _patternMatching;
+		private final String _path;
 		private Pattern _pattern;
 
 		/*
@@ -177,7 +177,11 @@ public class FilterRuleList {
 					}
 				} else {
 					// tail matching
-					_result = filename.endsWith("/"+path);
+					if (path.length()>filename.length()) {
+						_result = filename.endsWith("/"+path);
+					} else {
+						_result = filename.equals(path);
+					}
 				}
 			}
 
