@@ -1704,7 +1704,7 @@ public class Receiver implements RsyncTask,MessageHandler
                                        pathNameBytes, RsyncFileAttributes.stat(entry));
 
             // detect exclusion, TODO: check path conversion
-            boolean isEntryExcluded = _filterRuleConfiguration.getFilterRuleList().exclude("/"+relativePathName, Files.isDirectory(entry));
+            boolean isEntryExcluded = _filterRuleConfiguration.getFilterRuleList().exclude("./"+relativePathName, Files.isDirectory(entry));
 
             if (!isEntryExcluded && _isDelete && !builder.contains(fileInfo)) {
             	PathOps.deleteIfExists(fileInfo.path());

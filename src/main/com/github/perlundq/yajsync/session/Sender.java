@@ -735,7 +735,7 @@ public class Sender implements RsyncTask,MessageHandler
         assert directory != null;
 
         boolean isOK = true;
-        final Path localPart = getLocalPathOf(directory);                       // throws RuntimeException if unable to get local path prefix of directory, but that should never happen
+        final Path splittedPath[] = splitLocalPathOf(directory);                       // throws RuntimeException if unable to get local path prefix of directory, but that should never happen
 
         FilterRuleConfiguration localFilterRuleConfiguration;
 		try {
@@ -751,11 +751,6 @@ public class Sender implements RsyncTask,MessageHandler
 		}
         boolean filterByRules = localFilterRuleConfiguration.isFilterAvailable();
 
-        // do not send an excluded directory
-        if (filterByRules && localFilterRuleConfiguration.exclude(directory.path().toString(), Files.isDirectory(directory.path()))) {
-        	return isOK;
-        }
-
         // the JVM adds a lot of overhead when doing mostly directory traversals
         // and reading of file attributes
         try (DirectoryStream<Path> stream =
@@ -763,12 +758,7 @@ public class Sender implements RsyncTask,MessageHandler
 
             for (Path entry : stream) {
 
-            	// use filter
-            	if (filterByRules && localFilterRuleConfiguration.exclude(entry.toString(), Files.isDirectory(entry))) {
-            		continue;
-                }
-
-                if (!PathOps.isPathPreservable(entry.getFileName())) {          // TODO: add option to continue anyway
+            	if (!PathOps.isPathPreservable(entry.getFileName())) {          // TODO: add option to continue anyway
                     if (_log.isLoggable(Level.WARNING)) {
                         _log.warning(String.format(
                             "Skipping %s - unable to preserve file name",
@@ -790,7 +780,7 @@ public class Sender implements RsyncTask,MessageHandler
                     continue;
                 }
 
-                Path relativePath = localPart.relativize(entry);
+                Path relativePath = splittedPath[0].relativize(entry);
                 String relativePathName =
                     Text.withSlashAsPathSepator(relativePath.toString());
                 byte[] pathNameBytes =
@@ -798,6 +788,12 @@ public class Sender implements RsyncTask,MessageHandler
                 if (pathNameBytes != null) {
                     FileInfo fi = new FileInfo(entry, relativePath,
                                                pathNameBytes, attrs);    // throws IllegalArgumentException but that cannot happen
+
+                    // use filter
+                    if (filterByRules && localFilterRuleConfiguration.exclude(relativePathName, attrs.isDirectory())) {
+                		continue;
+                    }
+
                     builder.add(fi);
                 } else {
                     if (_log.isLoggable(Level.WARNING)) {
@@ -1266,7 +1262,7 @@ public class Sender implements RsyncTask,MessageHandler
         sendEncodedLong(stats.fileListTransferTime(), 3);
     }
 
-    private Path getLocalPathOf(FileInfo fileInfo)
+    private Path[] splitLocalPathOf(FileInfo fileInfo)
     {
         String pathName = _characterDecoder.decodeOrNull(fileInfo.pathNameBytes());
         if (pathName == null) {
@@ -1275,7 +1271,7 @@ public class Sender implements RsyncTask,MessageHandler
                 fileInfo, _characterDecoder.charset()));
         }
         Path relativePath = CustomFileSystem.getPath(pathName);
-        return PathOps.subtractPath(fileInfo.path(), relativePath);
+        return new Path[]{PathOps.subtractPath(fileInfo.path(), relativePath), relativePath};
     }
 
     // FIXME: code duplication with Receiver, move to Connection?

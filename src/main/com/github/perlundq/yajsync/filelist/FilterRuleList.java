@@ -35,24 +35,13 @@ public class FilterRuleList {
 	}
 
 	public boolean include(String filename, boolean isDirectory) {
-
-		for (FilterRule rule : _rules) {
-
-			if (!isDirectory && rule.isDirectoryOnly())
-				continue;
-
-			boolean matches = rule.matches(filename);
-
-			if (matches) {
-				return rule.isInclusion();
-			}
-		}
-
-		return false;
+		return !exclude(filename, isDirectory);
 	}
 
 	public boolean exclude(String filename, boolean isDirectory) {
 
+		boolean isExcludedMinOnce = false;
+
 		for (FilterRule rule : _rules) {
 
 			if (!isDirectory && rule.isDirectoryOnly())
@@ -61,11 +50,15 @@ public class FilterRuleList {
 			boolean matches = rule.matches(filename);
 
 			if (matches) {
-				return !rule.isInclusion();
+				if (rule.isInclusion()) {
+					return false;
+				} else {
+					isExcludedMinOnce = true;
+				}
 			}
 		}
 
-		return false;
+		return isExcludedMinOnce;
 	}
 
 	/*
@@ -78,7 +71,7 @@ public class FilterRuleList {
 		private final boolean _absoluteMatching;
 		private final boolean _negateMatching;
 		private final boolean _patternMatching;
-		private final String _path;
+		private String _path;
 		private Pattern _pattern;
 
 		/*
@@ -118,6 +111,11 @@ public class FilterRuleList {
 
 			_absoluteMatching = _path.startsWith("/");
 
+			// add . for absolute matching to conform to rsync paths
+			if (_absoluteMatching) {
+				_path = "."+_path;
+			}
+
 			// check if string or pattern matching is required
 			// _patternMatching = _path.contains("*") || _path.contains("?") ||
 			// _path.contains("[");
@@ -141,7 +139,7 @@ public class FilterRuleList {
 							&& _path.charAt(i + 1) == '*') {
 						b.append(".*");
 					} else if (c == '*') {
-						b.append("[^/]*");
+						b.append("[^/].*");
 					} else {
 						b.append(c);
 					}
@@ -177,7 +175,7 @@ public class FilterRuleList {
 					}
 				} else {
 					// tail matching
-					if (path.length()>filename.length()) {
+					if (path.length()<filename.length()) {
 						_result = filename.endsWith("/"+path);
 					} else {
 						_result = filename.equals(path);
@@ -201,11 +199,11 @@ public class FilterRuleList {
 			StringBuilder buf = new StringBuilder();
 			buf.append(_inclusion ? "+" : "-").append(" ");
 			buf.append(_negateMatching ? "!" : "");
-			if (_patternMatching) {
+			/* if (_patternMatching) {
 				buf.append(_pattern.toString());
-			} else {
+			} else { */
 				buf.append(_path);
-			}
+			// }
 			if (_directoryOnly) {
 				buf.append("/");
 			}
