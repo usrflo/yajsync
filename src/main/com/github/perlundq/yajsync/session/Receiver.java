@@ -1667,9 +1667,9 @@ public class Receiver implements RsyncTask,MessageHandler
 
     	try {
 
-    		if (deleteUnmatchedFile(builder, path)) {
+    		/* if (deleteUnmatchedFile(builder, path)) {
     			return ioError;
-    		}
+    		} */
 
     		try (DirectoryStream<Path> stream = Files.newDirectoryStream(path)) {
 	        	for (Path entry : stream) {
