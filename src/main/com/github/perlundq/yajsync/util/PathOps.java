@@ -207,11 +207,13 @@ public final class PathOps
         return CustomFileSystem.getPath(name);
     }
 
-    public static void deleteIfExists(Path path) throws IOException {
+    public static void deleteIfExists(Path path, Path basePath) throws IOException {
 
     	if (!Files.exists(path)) {
     		return;
     	}
+
+    	assert PathOps.EMPTY.equals(basePath) || path.normalize().startsWith(basePath);
 
     	if (Files.isDirectory(path)) {
 	    	Files.walkFileTree(path, new SimpleFileVisitor<Path>() {

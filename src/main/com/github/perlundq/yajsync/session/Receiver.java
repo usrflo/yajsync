@@ -1644,16 +1644,16 @@ public class Receiver implements RsyncTask,MessageHandler
         }
     }
 
-    public int deleteUnmatchedFiles(Filelist.SegmentBuilder builder, Path path) {
+    public int deleteUnmatchedFiles(Filelist.SegmentBuilder builder, Path basePath) {
 
     	int ioError = 0;
 
-    	if ((!_isDelete && !_isDeleteExcluded) || !Files.isDirectory(path) || !Files.exists(path)) {
+    	if ((!_isDelete && !_isDeleteExcluded) || !Files.isDirectory(basePath) || !Files.exists(basePath)) {
     		return ioError;
     	}
 
     	if (_log.isLoggable(Level.FINE)) {
-    		_log.fine(String.format("delete unmatched files in dir %s", path));
+    		_log.fine(String.format("delete unmatched files in dir %s", basePath));
     	}
 
     	if (_ioError!=0 /* & IOERR_GENERAL && !ignore_errors */) {	// TODO
@@ -1671,9 +1671,9 @@ public class Receiver implements RsyncTask,MessageHandler
     			return ioError;
     		} */
 
-    		try (DirectoryStream<Path> stream = Files.newDirectoryStream(path)) {
+    		try (DirectoryStream<Path> stream = Files.newDirectoryStream(basePath)) {
 	        	for (Path entry : stream) {
-	        		deleteUnmatchedFile(builder, entry);
+	        		deleteUnmatchedFile(builder, entry, basePath);
 	        	}
 	    	}
 
@@ -1681,7 +1681,7 @@ public class Receiver implements RsyncTask,MessageHandler
         	if (_log.isLoggable(Level.WARNING)) {
             	_log.warning(String.format("Got I/O error during deletion of unmatched files " +
                                            "of %s: %s",
-                                           path, e.getMessage()));
+                                           basePath, e.getMessage()));
             }
         	ioError = IoError.GENERAL;
         }
@@ -1689,7 +1689,7 @@ public class Receiver implements RsyncTask,MessageHandler
         return ioError;
     }
 
-    private boolean deleteUnmatchedFile(Filelist.SegmentBuilder builder, Path entry) throws IOException {
+    private boolean deleteUnmatchedFile(Filelist.SegmentBuilder builder, Path entry, Path basePath) throws IOException {
 
 		Path relativePath = _pathResolver.relativePathOf(entry);
 		if (relativePath.equals(PathOps.EMPTY)) {
@@ -1707,11 +1707,11 @@ public class Receiver implements RsyncTask,MessageHandler
             boolean isEntryExcluded = _filterRuleConfiguration.exclude("./"+relativePathName, Files.isDirectory(entry));
 
             if (!isEntryExcluded && _isDelete && !builder.contains(fileInfo)) {
-            	PathOps.deleteIfExists(fileInfo.path());
+            	PathOps.deleteIfExists(fileInfo.path(), basePath);
             	return true;
     		}
     		else if (isEntryExcluded && _isDeleteExcluded) {
-    			PathOps.deleteIfExists(fileInfo.path());
+    			PathOps.deleteIfExists(fileInfo.path(), basePath);
     			return true;
     		}
         }

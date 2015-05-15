@@ -78,7 +78,7 @@ public class Generator implements RsyncTask
     private final byte[] _checksumSeed;
 
     private final LinkedBlockingQueue<Job> _jobs = new LinkedBlockingQueue<>();
-    private Deque<Runnable> _deferredFileAttrUpdates = new ArrayDeque<>();
+    private final Deque<Runnable> _deferredFileAttrUpdates = new ArrayDeque<>();
     private final TextEncoder _characterEncoder;
     private final TextDecoder _characterDecoder;
     private final SimpleDateFormat _compatibleTimeFormatter =
@@ -962,7 +962,7 @@ public class Generator implements RsyncTask
     {
         if (existingAttrs != null &&
             existingAttrs.fileType() != fileInfo.attrs().fileType()) {
-        	PathOps.deleteIfExists(fileInfo.path());
+        	PathOps.deleteIfExists(fileInfo.path(), PathOps.EMPTY);
             return true;
         } else {
             return false;
