@@ -52,6 +52,10 @@ public final class RsyncTaskExecutor
             futures.add(ecs.submit(task));
         }
 
+        if (module!=null) {
+        	module.registerFutures(futures);
+        }
+
         Throwable thrown = null;
         boolean isOK = true;
 

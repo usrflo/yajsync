@@ -19,6 +19,7 @@ import java.security.Principal;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -26,6 +27,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.Rule;
@@ -220,6 +222,10 @@ class SimpleRestrictedModule extends RestrictedModule
 	@Override
 	public void postProcessing(boolean isOK) {
 	}
+
+	@Override
+	public void registerFutures(List<Future<Boolean>> futures) {
+	}
 }
 
 class SimpleModule implements Module
@@ -272,6 +278,10 @@ class SimpleModule implements Module
 
 	@Override
 	public void postProcessing(boolean isOK) {
+	}
+
+	@Override
+	public void registerFutures(List<Future<Boolean>> futures) {
 	}
 }
 

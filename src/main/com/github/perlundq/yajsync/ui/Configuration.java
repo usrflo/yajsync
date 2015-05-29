@@ -31,6 +31,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.Future;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -287,6 +288,10 @@ public class Configuration implements Modules
 
 		@Override
 		public void postProcessing(boolean isOK) {
+		}
+
+		@Override
+		public void registerFutures(List<Future<Boolean>> futures) {
 		}
     }
 

@@ -18,6 +18,9 @@
  */
 package com.github.perlundq.yajsync.session;
 
+import java.util.List;
+import java.util.concurrent.Future;
+
 public interface Module
 {
     String name();
@@ -26,4 +29,5 @@ public interface Module
     boolean isReadable();
     boolean isWritable();
     void postProcessing(boolean isOK);
+    void registerFutures(List<Future<Boolean>> futures);
 }
