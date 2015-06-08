@@ -296,14 +296,14 @@ public class Receiver implements RsyncTask,MessageHandler
                                         "isListOnly=%s, isPreserveTimes=%s, " +
                                         "isDelete=%s, isDeleteExcluded=%s, " +
                                         "isRecursive=%s, sendFilterRules=%s, " +
-                                        "filterRules=%s, " +
+                                        /* "filterRules=%s, " + */
                                         "receiveStatistics=%s, " +
                                         "exitEarlyIfEmptyList=%s",
                                         _targetPathName, _isDeferredWrite,
                                         _isListOnly, _isPreserveTimes,
                                         _isDelete, _isDeleteExcluded,
                                         _isRecursive, _isSendFilterRules,
-                                        _filterRuleConfiguration.getFilterRuleList()._rules,
+                                        /* _filterRuleConfiguration.getFilterRuleList()._rules, */
                                         _isReceiveStatistics,
                                         _isExitEarlyIfEmptyList));
             }
