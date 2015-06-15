@@ -241,6 +241,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
     private boolean _isIgnoreTimes;
     private boolean _isRecursiveTransfer;
     private boolean _isDelete;
@@ -414,6 +416,28 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                 @Override public void handleAndContinue(Option option) {
                     _isPreserveUser  = true;
                 }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "group", "g",
+                                          String.format("preserve group " +
+                                                        "(default %s)",
+                                                        _isPreserveGroup),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        _isPreserveGroup = true;
+                    }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "numeric-ids", "",
+                                          String.format("don't map uid/gid values by user/group name " +
+                                                        "(default %s)",
+                                                        _isNumericIds),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_isNumericIds = true;
+                    }}));
 
         options.add(
                 Option.newWithoutArgument(Option.Policy.OPTIONAL,
@@ -734,6 +758,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         session.setIsPreservePermissions(_isPreservePermissions);
         session.setIsPreserveTimes(_isPreserveTimes);
         session.setIsPreserveUser(_isPreserveUser);
+        session.setIsPreserveGroup(_isPreserveGroup);
+        session.setIsNumericIds(_isNumericIds);
         session.setIsIgnoreTimes(_isIgnoreTimes);
         session.setIsRecursiveTransfer(_isRecursiveTransfer);
         session.setIsDelete(_isDelete);
@@ -808,6 +834,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         localTransfer.setIsPreservePermissions(_isPreservePermissions);
         localTransfer.setIsPreserveTimes(_isPreserveTimes);
         localTransfer.setIsPreserveUser(_isPreserveUser);
+        localTransfer.setIsPreserveGroup(_isPreserveGroup);
+        localTransfer.setIsNumericIds(_isNumericIds);
         localTransfer.setIsDelete(_isDelete);
         localTransfer.setIsDeleteExcluded(_isDeleteExcluded);
         localTransfer.setIsIgnoreTimes(_isIgnoreTimes);

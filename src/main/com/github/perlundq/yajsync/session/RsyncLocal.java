@@ -36,6 +36,8 @@ public class RsyncLocal
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
     private boolean _isDelete;
     private boolean _isDeleteExcluded;
     private boolean _isIgnoreTimes;
@@ -81,6 +83,16 @@ public class RsyncLocal
     public void setIsPreserveUser(boolean isPreserveUser)
     {
         _isPreserveUser = isPreserveUser;
+    }
+
+    public void setIsPreserveGroup(boolean isPreserveGroup)
+    {
+        _isPreserveGroup = isPreserveGroup;
+    }
+
+    public void setIsNumericIds(boolean isNumericIds)
+    {
+        _isNumericIds = isNumericIds;
     }
 
     public void setIsDelete(boolean isDelete)
@@ -143,6 +155,8 @@ public class RsyncLocal
                                    _charset,
                                    checksumSeed).
             setIsPreserveUser(_isPreserveUser).
+            setIsPreserveGroup(_isPreserveGroup).
+            setIsNumericIds(_isNumericIds).
             setIsExitEarlyIfEmptyList(true).
             setIsRecursive(_isRecursiveTransfer).
             setFilterRuleConfiguration(_filterRuleConfiguration).
@@ -153,6 +167,8 @@ public class RsyncLocal
             setIsPreservePermissions(_isPreservePermissions).
             setIsPreserveTimes(_isPreserveTimes).
             setIsPreserveUser(_isPreserveUser).
+            setIsPreserveGroup(_isPreserveGroup).
+            setIsNumericIds(_isNumericIds).
             setIsIgnoreTimes(_isIgnoreTimes).
             setIsListOnly(_isModuleListing).
             setIsAlwaysItemize(_verbosity > 1);
@@ -165,6 +181,8 @@ public class RsyncLocal
             setIsPreservePermissions(_isPreservePermissions).
             setIsPreserveTimes(_isPreserveTimes).
             setIsPreserveUser(_isPreserveUser).
+            setIsPreserveGroup(_isPreserveGroup).
+            setIsNumericIds(_isNumericIds).
             setIsDelete(_isDelete).
             setIsDeleteExcluded(_isDeleteExcluded).
             setIsListOnly(_isModuleListing).

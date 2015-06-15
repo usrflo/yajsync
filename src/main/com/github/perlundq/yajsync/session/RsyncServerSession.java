@@ -69,6 +69,8 @@ public class RsyncServerSession
                                                      cfg.checksumSeed()).
                 setIsRecursive(cfg.isRecursive()).
                 setIsPreserveUser(cfg.isPreserveUser()).
+                setIsPreserveGroup(cfg.isPreserveGroup()).
+                setIsNumericIds(cfg.isNumericIds()).
                 setIsInterruptible(isChannelsInterruptible).
                 setIsSafeFileList(cfg.isSafeFileList()).
                 setIsTransferDirs(cfg.isTransferDirs());
@@ -81,6 +83,8 @@ public class RsyncServerSession
                     setIsPreservePermissions(cfg.isPreservePermissions()).
                     setIsPreserveTimes(cfg.isPreserveTimes()).
                     setIsPreserveUser(cfg.isPreserveUser()).
+                    setIsPreserveGroup(cfg.isPreserveGroup()).
+                    setIsNumericIds(cfg.isNumericIds()).
                     setIsIgnoreTimes(cfg.isIgnoreTimes()).
                     setIsAlwaysItemize(cfg.verbosity() > 1).
                     setIsInterruptible(isChannelsInterruptible);
@@ -91,6 +95,8 @@ public class RsyncServerSession
                     setIsPreservePermissions(cfg.isPreservePermissions()).
                     setIsPreserveTimes(cfg.isPreserveTimes()).
                     setIsPreserveUser(cfg.isPreserveUser()).
+                    setIsPreserveGroup(cfg.isPreserveGroup()).
+                    setIsNumericIds(cfg.isNumericIds()).
                     setIsDelete(cfg.isDelete()).
                     setIsDeleteExcluded(cfg.isDeleteExcluded()).
                     setIsDeferredWrite(_isDeferredWrite).

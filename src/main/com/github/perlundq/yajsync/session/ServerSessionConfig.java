@@ -59,6 +59,8 @@ public class ServerSessionConfig extends SessionConfig
     private boolean _isPreservePermissions = false;
     private boolean _isPreserveTimes = false;
     private boolean _isPreserveUser = false;
+    private boolean _isPreserveGroup = false;
+    private boolean _isNumericIds = false;
     private boolean _isDelete = false;
     private boolean _isDeleteExcluded = false;
     private boolean _isIgnoreTimes = false;
@@ -310,6 +312,22 @@ public class ServerSessionConfig extends SessionConfig
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "group", "g", "",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        setIsPreserveGroup();
+                    }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "numeric-ids", "", "",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	setIsNumericIds();
+                    }}));
+
+        argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "perms", "p", "",
             new Option.ContinuingHandler() {
@@ -480,6 +498,16 @@ public class ServerSessionConfig extends SessionConfig
         _isPreserveUser = true;
     }
 
+    private void setIsPreserveGroup()
+    {
+        _isPreserveGroup = true;
+    }
+
+    private void setIsNumericIds()
+    {
+        _isNumericIds = true;
+    }
+
     private void setIsDelete()
     {
         _isDelete = true;
@@ -523,6 +551,16 @@ public class ServerSessionConfig extends SessionConfig
     public boolean isPreserveUser()
     {
         return _isPreserveUser;
+    }
+
+    public boolean isPreserveGroup()
+    {
+        return _isPreserveGroup;
+    }
+
+    public boolean isNumericIds()
+    {
+        return _isNumericIds;
     }
 
     public boolean isDelete() {

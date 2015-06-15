@@ -2,6 +2,7 @@ package com.github.perlundq.yajsync.test;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -34,7 +35,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import com.github.perlundq.yajsync.filelist.Group;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
+import com.github.perlundq.yajsync.filelist.User;
 import com.github.perlundq.yajsync.security.RsyncAuthContext;
 import com.github.perlundq.yajsync.session.Module;
 import com.github.perlundq.yajsync.session.ModuleException;
@@ -110,6 +113,12 @@ class FileUtil
         return leftType == rightType && (!FileOps.isRegularFile(leftType) ||
                                          leftAttrs.size() == rightAttrs.size());
     }
+
+    public static boolean isFileSameOwnerAndGroup(RsyncFileAttributes leftAttrs,
+            RsyncFileAttributes rightAttrs)
+	{
+    	return leftAttrs.user().equals(rightAttrs.user()) && leftAttrs.group().equals(rightAttrs.group());
+	}
 
     private static SortedMap<Path, Path> listDir(Path path) throws IOException
     {
@@ -809,6 +818,72 @@ public class SystemTest
         assertTrue(status2.stats.numTransferredFiles() == 0);
         assertTrue(status2.stats.totalLiteralSize() == 0);
         assertTrue(status2.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientCopyPreserveOwnerAndGroup() throws IOException
+    {
+    	if (!User.root().name().equals(User.whoami().name())) {
+    		fail("owner/group test has to be run as root");
+    	}
+
+    	Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir = src.resolve("dir");
+        Path srcFile = srcDir.resolve("file");
+        Files.createDirectory(srcDir);
+        FileUtil.writeToFiles(1, srcFile);
+        FileOps.setOwner(srcFile, User.nobody());
+        FileOps.setGroup(srcFile, Group.nobody());
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir = copyOfSrc.resolve("dir");
+        Path dstFile = dstDir.resolve("file");
+        Files.createDirectory(dstDir);
+        FileUtil.writeToFiles(1, dstFile);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--owner", "--group");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(FileUtil.isFileSameOwnerAndGroup(RsyncFileAttributes.stat(srcFile), RsyncFileAttributes.stat(dstFile)));
+    }
+
+    @Test
+    public void testClientCopyPreserveUidAndGid() throws IOException
+    {
+    	if (!User.root().name().equals(User.whoami().name())) {
+    		fail("owner/group test has to be run as root");
+    	}
+
+    	Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir = src.resolve("dir");
+        Path srcFile = srcDir.resolve("file");
+        Files.createDirectory(srcDir);
+        FileUtil.writeToFiles(1, srcFile);
+        FileOps.setUserId(srcFile, User.nobody().id());
+        FileOps.setGroupId(srcFile, Group.nobody().id());
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir = copyOfSrc.resolve("dir");
+        Path dstFile = dstDir.resolve("file");
+        Files.createDirectory(dstDir);
+        FileUtil.writeToFiles(1, dstFile);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--owner", "--group", "--numeric-ids");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(FileUtil.isFileSameOwnerAndGroup(RsyncFileAttributes.stat(srcFile), RsyncFileAttributes.stat(dstFile)));
     }
 
     @Test(timeout=100)

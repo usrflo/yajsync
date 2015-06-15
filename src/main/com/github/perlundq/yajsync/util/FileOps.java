@@ -25,10 +25,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.UserPrincipalNotFoundException;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import com.github.perlundq.yajsync.filelist.Group;
 import com.github.perlundq.yajsync.filelist.User;
 
 public class FileOps
@@ -357,6 +359,23 @@ public class FileOps
         try {
             Files.setAttribute(path, "posix:owner", user.userPrincipal(),
                                linkOption);
+        } catch (UserPrincipalNotFoundException e) {
+        	// fallback to user id
+        	setUserId(path, user.id(), linkOption);
+        } catch (UnsupportedOperationException e) {
+            throw new IOException(e);
+        }
+    }
+
+    public static void setGroup(Path path, Group group, LinkOption... linkOption)
+            throws IOException
+    {
+        try {
+            Files.setAttribute(path, "posix:group", group.groupPrincipal(),
+                               linkOption);
+        } catch (UserPrincipalNotFoundException e) {
+        	// fallback to group id
+        	setGroupId(path, group.id(), linkOption);
         } catch (UnsupportedOperationException e) {
             throw new IOException(e);
         }
@@ -367,6 +386,16 @@ public class FileOps
     {
         try {
             Files.setAttribute(path, "unix:uid", uid, linkOption);
+        } catch (UnsupportedOperationException e) {
+            throw new IOException(e);
+        }
+    }
+
+    public static void setGroupId(Path path, int gid, LinkOption... linkOption)
+            throws IOException
+    {
+        try {
+            Files.setAttribute(path, "unix:gid", gid, linkOption);
         } catch (UnsupportedOperationException e) {
             throw new IOException(e);
         }

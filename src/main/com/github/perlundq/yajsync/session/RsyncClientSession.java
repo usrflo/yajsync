@@ -46,6 +46,8 @@ public class RsyncClientSession
     private Statistics _statistics = new Statistics();
     private boolean _isPreservePermissions;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
     private boolean _isDelete;
     private boolean _isDeleteExcluded;
     private boolean _isIgnoreTimes;
@@ -65,9 +67,21 @@ public class RsyncClientSession
         return this;
     }
 
-    public RsyncClientSession setIsPreserveUser(boolean isPreservedUser)
+    public RsyncClientSession setIsPreserveUser(boolean isPreserveUser)
     {
-        _isPreserveUser = isPreservedUser;
+        _isPreserveUser = isPreserveUser;
+        return this;
+    }
+
+    public RsyncClientSession setIsPreserveGroup(boolean isPreserveGroup)
+    {
+        _isPreserveGroup = isPreserveGroup;
+        return this;
+    }
+
+    public RsyncClientSession setIsNumericIds(boolean isNumericIds)
+    {
+    	_isNumericIds = isNumericIds;
         return this;
     }
 
@@ -161,6 +175,9 @@ public class RsyncClientSession
         if (_isPreserveUser) {
             sb.append("o");
         }
+        if (_isPreserveGroup) {
+            sb.append("g");
+        }
         if (_isIgnoreTimes) {
             sb.append("I");
         }
@@ -178,6 +195,9 @@ public class RsyncClientSession
         // revisit if we add support for --iconv
         serverArgs.add(sb.toString());
 
+        if (_isNumericIds) {
+        	serverArgs.add("--numeric-ids");
+        }
         if (_isDelete) {
         	serverArgs.add("--delete");
         }
@@ -261,6 +281,8 @@ public class RsyncClientSession
                     setIsPreservePermissions(_isPreservePermissions).
                     setIsPreserveTimes(_isPreserveTimes).
                     setIsPreserveUser(_isPreserveUser).
+                    setIsPreserveGroup(_isPreserveGroup).
+                    setIsNumericIds(_isNumericIds).
                     setIsIgnoreTimes(_isIgnoreTimes).
                     setIsAlwaysItemize(_verbosity > 1).
                     setIsListOnly(_isModuleListing).
@@ -274,6 +296,8 @@ public class RsyncClientSession
                 setIsPreservePermissions(_isPreservePermissions).
                 setIsPreserveTimes(_isPreserveTimes).
                 setIsPreserveUser(_isPreserveUser).
+                setIsPreserveGroup(_isPreserveGroup).
+                setIsNumericIds(_isNumericIds).
                 setIsDelete(_isDelete).
                 setIsDeleteExcluded(_isDeleteExcluded).
                 setIsListOnly(_isModuleListing).

@@ -90,6 +90,8 @@ public class Generator implements RsyncTask
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
     private boolean _isIgnoreTimes;
     private boolean _isListOnly;
     private Filelist _fileList;  // effectively final
@@ -158,6 +160,18 @@ public class Generator implements RsyncTask
     public Generator setIsPreserveUser(boolean isPreserveUser)
     {
         _isPreserveUser = isPreserveUser;
+        return this;
+    }
+
+    public Generator setIsPreserveGroup(boolean isPreserveGroup)
+    {
+        _isPreserveGroup = isPreserveGroup;
+        return this;
+    }
+
+    public Generator setIsNumericIds(boolean isNumericIds)
+    {
+        _isNumericIds = isNumericIds;
         return this;
     }
 
@@ -804,36 +818,69 @@ public class Generator implements RsyncTask
         //       succeed).
         // NOTE: we cannot detect if we have the capabilities to change
         //       ownership (knowing if UID 0 is not sufficient)
-        // TODO: fall back to changing uid (find out how rsync works) if name
-        //       change fails
-        if (_isPreserveUser && !targetAttrs.user().name().isEmpty() &&
-            (curAttrs == null ||
-             !curAttrs.user().name().equals(targetAttrs.user().name())))
-        {
-            if (_log.isLoggable(Level.FINE)) {
-                _log.fine(String.format(
-                    "(Generator) updating ownership %s -> %s on %s",
-                    curAttrs == null ? "" : curAttrs.user(),
-                    targetAttrs.user(), path));
-            }
-            // NOTE: side effect of chown in Linux is that set user/group id bit
-            //       might be cleared.
-            FileOps.setOwner(path, targetAttrs.user(),
-                             LinkOption.NOFOLLOW_LINKS);
-        } else if (_isPreserveUser && targetAttrs.user().name().isEmpty() &&
-            (curAttrs == null ||
-             curAttrs.user().uid() != targetAttrs.user().uid()))
-        {
-            if (_log.isLoggable(Level.FINE)) {
-                _log.fine(String.format(
-                    "(Generator) updating uid %s -> %d on %s",
-                    curAttrs == null ? "" : curAttrs.user().uid(),
-                    targetAttrs.user().uid(), path));
-            }
-            // NOTE: side effect of chown in Linux is that set user/group id bit
-            //       might be cleared.
-            FileOps.setUserId(path, targetAttrs.user().uid(),
-                              LinkOption.NOFOLLOW_LINKS);
+        // NOTE: fall back to changing uid/gid if username/groupname unknown
+        if (_isPreserveUser) {
+	        if (!_isNumericIds && !targetAttrs.user().name().isEmpty() &&
+	            (curAttrs == null ||
+	             !curAttrs.user().name().equals(targetAttrs.user().name())))
+	        {
+	            if (_log.isLoggable(Level.FINE)) {
+	                _log.fine(String.format(
+	                    "(Generator) updating ownership %s -> %s on %s",
+	                    curAttrs == null ? "" : curAttrs.user(),
+	                    targetAttrs.user(), path));
+	            }
+	            // NOTE: side effect of chown in Linux is that set user/group id bit
+	            //       might be cleared.
+	            FileOps.setOwner(path, targetAttrs.user(),
+	                             LinkOption.NOFOLLOW_LINKS);
+	        } else if ((_isNumericIds || targetAttrs.user().name().isEmpty()) &&
+	            (curAttrs == null ||
+	             curAttrs.user().id() != targetAttrs.user().id()))
+	        {
+	            if (_log.isLoggable(Level.FINE)) {
+	                _log.fine(String.format(
+	                    "(Generator) updating uid %s -> %d on %s",
+	                    curAttrs == null ? "" : curAttrs.user().id(),
+	                    targetAttrs.user().id(), path));
+	            }
+	            // NOTE: side effect of chown in Linux is that set user/group id bit
+	            //       might be cleared.
+	            FileOps.setUserId(path, targetAttrs.user().id(),
+	                              LinkOption.NOFOLLOW_LINKS);
+	        }
+        }
+
+        if (_isPreserveGroup) {
+        	if (!_isNumericIds && !targetAttrs.group().name().isEmpty() &&
+	                (curAttrs == null ||
+	                 !curAttrs.group().name().equals(targetAttrs.group().name())))
+	        {
+	            if (_log.isLoggable(Level.FINE)) {
+	                _log.fine(String.format(
+	                    "(Generator) updating group %s -> %s on %s",
+	                    curAttrs == null ? "" : curAttrs.group(),
+	                    targetAttrs.group(), path));
+	            }
+	            // NOTE: side effect of chown in Linux is that set user/group id bit
+	            //       might be cleared.
+	            FileOps.setGroup(path, targetAttrs.group(),
+	                             LinkOption.NOFOLLOW_LINKS);
+	        } else if ((_isNumericIds || targetAttrs.group().name().isEmpty()) &&
+	            (curAttrs == null ||
+	             curAttrs.group().id() != targetAttrs.group().id()))
+	        {
+	            if (_log.isLoggable(Level.FINE)) {
+	                _log.fine(String.format(
+	                    "(Generator) updating uid %s -> %d on %s",
+	                    curAttrs == null ? "" : curAttrs.group().id(),
+	                    targetAttrs.group().id(), path));
+	            }
+	            // NOTE: side effect of chown in Linux is that set user/group id bit
+	            //       might be cleared.
+	            FileOps.setGroupId(path, targetAttrs.group().id(),
+	                              LinkOption.NOFOLLOW_LINKS);
+	        }
         }
     }
 
@@ -914,6 +961,9 @@ public class Generator implements RsyncTask
         }
         if (_isPreserveUser && !curAttrs.user().equals(targetAttrs.user())) {
             iFlags |= Item.REPORT_OWNER;
+        }
+        if (_isPreserveGroup && !curAttrs.group().equals(targetAttrs.group())) {
+            iFlags |= Item.REPORT_GROUP;
         }
         if (curAttrs.isRegularFile() && curAttrs.size() != targetAttrs.size()) {
             iFlags |= Item.REPORT_SIZE;

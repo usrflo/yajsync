@@ -52,6 +52,7 @@ import com.github.perlundq.yajsync.filelist.ConcurrentFilelist;
 import com.github.perlundq.yajsync.filelist.FileInfo;
 import com.github.perlundq.yajsync.filelist.Filelist;
 import com.github.perlundq.yajsync.filelist.FilterRuleList;
+import com.github.perlundq.yajsync.filelist.Group;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
 import com.github.perlundq.yajsync.filelist.User;
 import com.github.perlundq.yajsync.io.CustomFileSystem;
@@ -122,6 +123,7 @@ public class Receiver implements RsyncTask,MessageHandler
     private static final int INPUT_CHANNEL_BUF_SIZE = 8 * 1024;
     private final FileInfoCache _fileInfoCache = new FileInfoCache();
     private final Map<Integer, User> _uidUserMap = new HashMap<>();
+    private final Map<Integer, Group> _gidGroupMap = new HashMap<>();
     private final Generator _generator;
     private final RsyncInChannel _senderInChannel;
     private final Statistics _stats = new Statistics();
@@ -137,6 +139,8 @@ public class Receiver implements RsyncTask,MessageHandler
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
     private boolean _isDeferredWrite;
     private boolean _isInterruptible = true;
     private boolean _isExitAfterEOF;
@@ -212,6 +216,18 @@ public class Receiver implements RsyncTask,MessageHandler
     public Receiver setIsPreserveUser(boolean isPreserveUser)
     {
         _isPreserveUser = isPreserveUser;
+        return this;
+    }
+
+    public Receiver setIsPreserveGroup(boolean isPreserveGroup)
+    {
+        _isPreserveGroup = isPreserveGroup;
+        return this;
+    }
+
+    public Receiver setIsNumericIds(boolean isNumericIds)
+    {
+        _isNumericIds = isNumericIds;
         return this;
     }
 
@@ -319,17 +335,29 @@ public class Receiver implements RsyncTask,MessageHandler
 				}
             }
 
-            if (_isPreserveUser && _isRecursive) {
-                _uidUserMap.put(User.root().uid(), User.root());
+            if (_isRecursive) {
+	            if (_isPreserveUser) {
+	                _uidUserMap.put(User.root().id(), User.root());
+	            }
+	            if (_isPreserveGroup) {
+	            	_gidGroupMap.put(Group.root().id(), Group.root());
+	            }
             }
 
             List<FileInfoStub> stubs = new LinkedList<>();
             _ioError |= receiveFileMetaDataInto(stubs);
 
-            if (_isPreserveUser && !_isRecursive) {
-                Map<Integer, User> uidUserMap = receiveUserList();
-                uidUserMap.put(User.root().uid(), User.root());
-                addUserNameToStubs(uidUserMap, stubs);
+            if (!_isRecursive && !_isNumericIds) {
+	            if (_isPreserveUser) {
+	                Map<Integer, User> uidUserMap = receiveUserList();
+	                uidUserMap.put(User.root().id(), User.root());
+	                addUserNameToStubs(uidUserMap, stubs);
+	            }
+	            if (_isPreserveGroup) {
+	                Map<Integer, Group> gidGroupMap = receiveGroupList();
+	                gidGroupMap.put(Group.root().id(), Group.root());
+	                addGroupNameToStubs(gidGroupMap, stubs);
+	            }
             }
 
             if (stubs.size() == 0 && _isExitEarlyIfEmptyList) {
@@ -408,6 +436,24 @@ public class Receiver implements RsyncTask,MessageHandler
         }
     }
 
+    /**
+     * @throws RsyncProtocolException if group name is the empty string
+     */
+    private Map<Integer, Group> receiveGroupList() throws ChannelException
+    {
+        Map<Integer, Group> groups = new HashMap<>();
+        while (true) {
+            int gid = receiveGroupId();
+            boolean isDone = gid == 0;
+            if (isDone) {
+                return groups;
+            }
+            String groupName = receiveGroupName();
+            Group group = new Group(groupName, gid);
+            groups.put(gid, group);
+        }
+    }
+
     private void addUserNameToStubs(Map<Integer, User> uidUserMap,
                                     List<FileInfoStub> stubs)
         throws ChannelException
@@ -420,16 +466,42 @@ public class Receiver implements RsyncTask,MessageHandler
                     "expected user name of %s to be the empty string",
                     incompleteAttrs));
             }
-            User completeUser = uidUserMap.get(incompleteAttrs.user().uid());
+            User completeUser = uidUserMap.get(incompleteAttrs.user().id());
             if (completeUser != null) {
                 RsyncFileAttributes completeAttrs =
                     new RsyncFileAttributes(incompleteAttrs.mode(),
                                             incompleteAttrs.size(),
                                             incompleteAttrs.lastModifiedTime(),
-                                            completeUser);
+                                            completeUser,
+                                            incompleteAttrs.group());
                 stub._attrs = completeAttrs;
             }
         }
+    }
+
+    private void addGroupNameToStubs(Map<Integer, Group> gidGroupMap,
+    		List<FileInfoStub> stubs)
+    				throws ChannelException
+    {
+    	for (FileInfoStub stub : stubs) {
+    		RsyncFileAttributes incompleteAttrs = stub._attrs;
+    		boolean isComplete = incompleteAttrs.group().name().length() > 0;
+    		if (isComplete) {
+    			throw new RsyncProtocolException(String.format(
+    					"expected group name of %s to be the empty string",
+    					incompleteAttrs));
+    		}
+    		Group completeGroup = gidGroupMap.get(incompleteAttrs.group().id());
+    		if (completeGroup != null) {
+    			RsyncFileAttributes completeAttrs =
+    					new RsyncFileAttributes(incompleteAttrs.mode(),
+    							incompleteAttrs.size(),
+    							incompleteAttrs.lastModifiedTime(),
+    							incompleteAttrs.user(),
+    							completeGroup);
+    			stub._attrs = completeAttrs;
+    		}
+    	}
     }
 
     /**
@@ -957,29 +1029,57 @@ public class Receiver implements RsyncTask,MessageHandler
             FileOps.setLastModifiedTime(path, targetAttrs.lastModifiedTime(),
                                         LinkOption.NOFOLLOW_LINKS);
         }
-        if (_isPreserveUser && !targetAttrs.user().name().isEmpty() &&
-            !curAttrs.user().name().equals(targetAttrs.user().name())) {
-            if (_log.isLoggable(Level.FINE)) {
-                _log.fine(String.format("updating ownership %s -> %s on %s",
-                                        curAttrs.user(), targetAttrs.user(),
-                                        path));
-            }
-            // FIXME: side effect of chown in Linux is that set user/group id
-            //        bit are cleared.
-            FileOps.setOwner(path, targetAttrs.user(),
-                             LinkOption.NOFOLLOW_LINKS);
-        } else if (_isPreserveUser && targetAttrs.user().name().isEmpty() &&
-             curAttrs.user().uid() != targetAttrs.user().uid())
-        {
-            if (_log.isLoggable(Level.FINE)) {
-                _log.fine(String.format("updating uid %d -> %d on %s",
-                                        curAttrs.user().uid(),
-                                        targetAttrs.user().uid(), path));
-            }
-            // NOTE: side effect of chown in Linux is that set user/group id bit
-            //       might be cleared.
-            FileOps.setUserId(path, targetAttrs.user().uid(),
-                              LinkOption.NOFOLLOW_LINKS);
+        if (_isPreserveUser) {
+	        if (!_isNumericIds && !targetAttrs.user().name().isEmpty() &&
+	            !curAttrs.user().name().equals(targetAttrs.user().name())) {
+	            if (_log.isLoggable(Level.FINE)) {
+	                _log.fine(String.format("updating ownership %s -> %s on %s",
+	                                        curAttrs.user(), targetAttrs.user(),
+	                                        path));
+	            }
+	            // FIXME: side effect of chown in Linux is that set user/group id
+	            //        bit are cleared.
+	            FileOps.setOwner(path, targetAttrs.user(),
+	                             LinkOption.NOFOLLOW_LINKS);
+	        } else if ((_isNumericIds || targetAttrs.user().name().isEmpty()) &&
+	             curAttrs.user().id() != targetAttrs.user().id())
+	        {
+	            if (_log.isLoggable(Level.FINE)) {
+	                _log.fine(String.format("updating uid %d -> %d on %s",
+	                                        curAttrs.user().id(),
+	                                        targetAttrs.user().id(), path));
+	            }
+	            // NOTE: side effect of chown in Linux is that set user/group id bit
+	            //       might be cleared.
+	            FileOps.setUserId(path, targetAttrs.user().id(),
+	                              LinkOption.NOFOLLOW_LINKS);
+	        }
+        }
+        if (_isPreserveGroup) {
+	        if (!_isNumericIds && !targetAttrs.group().name().isEmpty() &&
+	            !curAttrs.group().name().equals(targetAttrs.group().name())) {
+	            if (_log.isLoggable(Level.FINE)) {
+	                _log.fine(String.format("updating group%s -> %s on %s",
+	                                        curAttrs.group(), targetAttrs.group(),
+	                                        path));
+	            }
+	            // FIXME: side effect of chown in Linux is that set user/group id
+	            //        bit are cleared.
+	            FileOps.setGroup(path, targetAttrs.group(),
+	                             LinkOption.NOFOLLOW_LINKS);
+	        } else if ((_isNumericIds || targetAttrs.group().name().isEmpty()) &&
+	             curAttrs.group().id() != targetAttrs.group().id())
+	        {
+	            if (_log.isLoggable(Level.FINE)) {
+	                _log.fine(String.format("updating gid %d -> %d on %s",
+	                                        curAttrs.group().id(),
+	                                        targetAttrs.group().id(), path));
+	            }
+	            // NOTE: side effect of chown in Linux is that set user/group id bit
+	            //       might be cleared.
+	            FileOps.setGroupId(path, targetAttrs.group().id(),
+	                              LinkOption.NOFOLLOW_LINKS);
+	        }
         }
     }
 
@@ -996,7 +1096,7 @@ public class Receiver implements RsyncTask,MessageHandler
         if (isRemoteAndLocalFileIdentical(resultFile, md, fileInfo)) {
             try {
                 if (_isPreservePermissions || _isPreserveTimes ||
-                    _isPreserveUser)
+                    _isPreserveUser || _isPreserveGroup)
                 {
                     updateAttrsIfDiffer(resultFile, fileInfo.attrs());
                 }
@@ -1266,7 +1366,7 @@ public class Receiver implements RsyncTask,MessageHandler
             }
             if (_isRecursive && isReceiveUserName) {
                 user = receiveUser();
-                _uidUserMap.put(user.uid(), user);
+                _uidUserMap.put(user.id(), user);
             } else if (_isRecursive) {  // && !isReceiveUsername where isReceiveUserName is only true once for every new mapping, old ones have been sent previously
                 int uid = receiveUserId();
                 user = _uidUserMap.get(uid);  // Note: _uidUserMap contains a predefined mapping for root
@@ -1279,15 +1379,49 @@ public class Receiver implements RsyncTask,MessageHandler
             _fileInfoCache.setPrevUser(user);
         }
 
+        Group group;
+        boolean reusePrevGroupId = (xflags & TransmitFlags.SAME_GID) != 0;
+        if (reusePrevGroupId) {
+            group = getPreviousGroup();
+        } else {
+            if (!_isPreserveGroup) {
+                throw new RsyncProtocolException("got new gid when not " +
+                                                 "preserving gid");
+            }
+            boolean isReceiveGroupName =
+                (xflags & TransmitFlags.GROUP_NAME_FOLLOWS) != 0;
+            if (isReceiveGroupName && !_isRecursive) {
+                throw new RsyncProtocolException("got group name mapping when " +
+                                                 "not doing incremental " +
+                                                 "recursion");
+            }
+            if (_isRecursive && isReceiveGroupName) {
+                group = receiveGroup();
+                _gidGroupMap.put(group.id(), group);
+            } else if (_isRecursive) {  // && !isReceiveGroupname where isReceiveGroupName is only true once for every new mapping, old ones have been sent previously
+                int gid = receiveGroupId();
+                group = _gidGroupMap.get(gid);  // Note: _gidGroupMap contains a predefined mapping for root
+                if (group == null) {
+                	group = new Group("", gid);
+                }
+            } else { // if (!_isRecursive) {
+            	group = receiveIncompleteGroup();  // Group with gid but no group name. Group name mappings are sent in batch after initial file list
+            }
+            _fileInfoCache.setPrevGroup(group);
+        }
+
+        /*
         if ((xflags & TransmitFlags.SAME_GID) == 0) {
             throw new RsyncProtocolException("TransmitFlags.SAME_GID is " +
                                              "required");
         }
+        */
 
         RsyncFileAttributes attrs = new RsyncFileAttributes(mode,
                                                             fileSize,
                                                             lastModified,
-                                                            user);      // throws IllegalArgumentException if fileSize or lastModified is negative, but we check for this earlier
+                                                            user,      // throws IllegalArgumentException if fileSize or lastModified is negative, but we check for this earlier
+                                                            group);
         return attrs;
     }
 
@@ -1304,10 +1438,29 @@ public class Receiver implements RsyncTask,MessageHandler
         return user;
     }
 
+    private Group getPreviousGroup()
+    {
+        Group group = _fileInfoCache.getPrevGroupOrNull();
+        if (group == null) {
+            if (_isPreserveGroup) {
+                throw new RsyncProtocolException("expecting to receive group " +
+                                                 "information from peer");
+            }
+            return Group.whoami();
+        }
+        return group;
+    }
+
     private User receiveIncompleteUser() throws ChannelException
     {
         int uid = receiveUserId();
         return new User("", uid);
+    }
+
+    private Group receiveIncompleteGroup() throws ChannelException
+    {
+        int gid = receiveGroupId();
+        return new Group("", gid);
     }
 
     private int receiveUserId() throws ChannelException
@@ -1316,12 +1469,26 @@ public class Receiver implements RsyncTask,MessageHandler
         if (_log.isLoggable(Level.FINER)) {
             _log.finer("received user id " + uid);
         }
-        if (uid < 0 || uid > User.UID_MAX) {
+        if (uid < 0 || uid > User.ID_MAX) {
             throw new RsyncProtocolException(String.format(
                 "received illegal value for user id: %d (valid range [0..%d]",
-                uid, User.UID_MAX));
+                uid, User.ID_MAX));
         }
         return uid;
+    }
+
+    private int receiveGroupId() throws ChannelException
+    {
+        int gid = receiveAndDecodeInt();
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("received group id " + gid);
+        }
+        if (gid < 0 || gid > Group.ID_MAX) {
+            throw new RsyncProtocolException(String.format(
+                "received illegal value for group id: %d (valid range [0..%d]",
+                gid, Group.ID_MAX));
+        }
+        return gid;
     }
 
     /**
@@ -1341,11 +1508,35 @@ public class Receiver implements RsyncTask,MessageHandler
         return userName;
     }
 
+    /**
+     * @throws RsyncProtocolException if user name is the empty string
+     */
+    private String receiveGroupName() throws ChannelException
+    {
+        int nameLength = 0xFF & _senderInChannel.getByte();
+        ByteBuffer buf = _senderInChannel.get(nameLength);
+        String groupName = _characterDecoder.decode(buf);
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("received group name " + groupName);
+        }
+        if (groupName.isEmpty()) {
+            throw new RsyncProtocolException("group name is empty");
+        }
+        return groupName;
+    }
+
     private User receiveUser() throws ChannelException
     {
         int uid = receiveUserId();
         String userName = receiveUserName();
         return new User(userName, uid);
+    }
+
+    private Group receiveGroup() throws ChannelException
+    {
+        int gid = receiveGroupId();
+        String groupName = receiveGroupName();
+        return new Group(groupName, gid);
     }
 
     // FIXME: remove me, replace with combineDataToFile
