@@ -68,7 +68,10 @@ public class RsyncServerSession
                                                      cfg.charset(),
                                                      cfg.checksumSeed()).
                 setIsRecursive(cfg.isRecursive()).
-                setIsInterruptible(isChannelsInterruptible);
+                setIsPreserveUser(cfg.isPreserveUser()).
+                setIsInterruptible(isChannelsInterruptible).
+                setIsSafeFileList(cfg.isSafeFileList()).
+                setIsTransferDirs(cfg.isTransferDirs());
             return RsyncTaskExecutor.exec(executor, sender);
         } else {
             Generator generator =
@@ -77,6 +80,8 @@ public class RsyncServerSession
                     setIsRecursive(cfg.isRecursive()).
                     setIsPreservePermissions(cfg.isPreservePermissions()).
                     setIsPreserveTimes(cfg.isPreserveTimes()).
+                    setIsPreserveUser(cfg.isPreserveUser()).
+                    setIsIgnoreTimes(cfg.isIgnoreTimes()).
                     setIsAlwaysItemize(cfg.verbosity() > 1).
                     setIsInterruptible(isChannelsInterruptible);
             Receiver receiver =
@@ -85,8 +90,10 @@ public class RsyncServerSession
                     setIsRecursive(cfg.isRecursive()).
                     setIsPreservePermissions(cfg.isPreservePermissions()).
                     setIsPreserveTimes(cfg.isPreserveTimes()).
+                    setIsPreserveUser(cfg.isPreserveUser()).
                     setIsDeferredWrite(_isDeferredWrite).
-                    setIsInterruptible(isChannelsInterruptible);
+                    setIsInterruptible(isChannelsInterruptible).
+                    setIsSafeFileList(cfg.isSafeFileList());
 
             return RsyncTaskExecutor.exec(executor, generator,
                                                     receiver);

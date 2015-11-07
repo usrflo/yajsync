@@ -31,7 +31,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -46,6 +51,7 @@ import com.github.perlundq.yajsync.channels.RsyncOutChannel;
 import com.github.perlundq.yajsync.filelist.FileInfo;
 import com.github.perlundq.yajsync.filelist.Filelist;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
+import com.github.perlundq.yajsync.filelist.User;
 import com.github.perlundq.yajsync.io.FileView;
 import com.github.perlundq.yajsync.io.FileViewNotFound;
 import com.github.perlundq.yajsync.io.FileViewOpenFailed;
@@ -58,6 +64,7 @@ import com.github.perlundq.yajsync.util.MD5;
 import com.github.perlundq.yajsync.util.PathOps;
 import com.github.perlundq.yajsync.util.Rolling;
 import com.github.perlundq.yajsync.util.RuntimeInterruptException;
+import com.github.perlundq.yajsync.util.StatusResult;
 
 public class Sender implements RsyncTask,MessageHandler
 {
@@ -74,15 +81,18 @@ public class Sender implements RsyncTask,MessageHandler
     private final Iterable<Path> _sourceFiles;
     private final TextDecoder _characterDecoder;
     private final TextEncoder _characterEncoder;
+    private final Set<User> _transferredUserNames = new LinkedHashSet<>();
     private boolean _isReceiveFilterRules;
     private boolean _isSendStatistics;
     private boolean _isExitEarlyIfEmptyList;
     private boolean _isRecursive;
+    private boolean _isPreserveUser;
+    private boolean _isSafeFileList = true;
     private int _nextSegmentIndex;
     private Statistics _stats = new Statistics();
     private boolean _isInterruptible = true;
     private boolean _isExitAfterEOF = false;
-
+    private boolean _isTransferDirs = false;
     private int _ioError;
 
     public Sender(ReadableByteChannel in,
@@ -135,6 +145,12 @@ public class Sender implements RsyncTask,MessageHandler
         return this;
     }
 
+    public Sender setIsPreserveUser(boolean isPreserveUser)
+    {
+        _isPreserveUser = isPreserveUser;
+        return this;
+    }
+
     public Sender setIsExitAfterEOF(boolean isExitAfterEOF)
     {
         _isExitAfterEOF = isExitAfterEOF;
@@ -162,6 +178,18 @@ public class Sender implements RsyncTask,MessageHandler
     public Sender setIsExitEarlyIfEmptyList(boolean isExitEarlyIfEmptyList)
     {
         _isExitEarlyIfEmptyList = isExitEarlyIfEmptyList;
+        return this;
+    }
+
+    public Sender setIsSafeFileList(boolean isSafeFileList)
+    {
+        _isSafeFileList = isSafeFileList;
+        return this;
+    }
+
+    public Sender setIsTransferDirs(boolean isTransferDirs)
+    {
+        _isTransferDirs = isTransferDirs;
         return this;
     }
 
@@ -197,8 +225,11 @@ public class Sender implements RsyncTask,MessageHandler
             }
 
             long t1 = System.currentTimeMillis();
+
+            StatusResult<Set<FileInfo>> expandResult = initialExpand(_sourceFiles);
+            boolean isInitialListOK = expandResult.isOK();
             Filelist.SegmentBuilder builder = new Filelist.SegmentBuilder(null);
-            boolean isInitialListOK = initialExpand(builder, _sourceFiles);
+            builder.addAll(expandResult.value());
 
             Filelist.Segment initialSegment = fileList.newSegment(builder);
 
@@ -217,10 +248,18 @@ public class Sender implements RsyncTask,MessageHandler
             }
             long t3 = System.currentTimeMillis();
 
+            if (_isPreserveUser && !_isRecursive) {
+                sendUserList();
+            }
+
             _stats.setFileListBuildTime(Math.max(1, t2 - t1));
             _stats.setFileListTransferTime(Math.max(0, t3 - t2));
             long segmentSize = _duplexChannel.numBytesWritten() - numBytesWritten;
             _stats.setTotalFileListSize(_stats.totalFileListSize() + segmentSize);
+
+            if (!_isSafeFileList && !isInitialListOK) {
+                sendIntMessage(MessageCode.IO_ERROR, IoError.GENERAL);
+            }
 
             if (initialSegment.isFinished() && _isExitEarlyIfEmptyList) {
                 if (_log.isLoggable(Level.FINE)) {
@@ -266,6 +305,39 @@ public class Sender implements RsyncTask,MessageHandler
             _stats.setTotalWritten(_duplexChannel.numBytesWritten());
             _stats.setNumFiles(fileList.numFiles());
         }
+    }
+
+    private void sendUserId(int uid) throws ChannelException
+    {
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("sending user id " + uid);
+        }
+        sendEncodedInt(uid);
+    }
+
+    private void sendUserName(String name) throws ChannelException
+    {
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("sending user name " + name);
+        }
+        ByteBuffer buf = ByteBuffer.wrap(_characterEncoder.encode(name));
+        if (buf.remaining() > 0xFF) { // unlikely scenario, we could also recover from this (by truncating or falling back to nobody)
+            throw new IllegalStateException(String.format(
+                "encoded length of user name %s is %d, which is larger than " +
+                "what fits in a byte (255)", name, buf.remaining()));
+        }
+        _duplexChannel.putByte((byte) buf.remaining());
+        _duplexChannel.put(buf);
+    }
+
+    private void sendUserList() throws ChannelException
+    {
+        for (User user : _transferredUserNames) {
+            assert user.uid() != User.root().uid();
+            sendUserId(user.uid());
+            sendUserName(user.name());
+        }
+        sendEncodedInt(0);
     }
 
     /**
@@ -560,10 +632,10 @@ public class Sender implements RsyncTask,MessageHandler
 
     // NOTE: doesn't do any check of the validity of files or normalization -
     // it's up to the caller to do so, e.g. ServerSessionConfig.parseArguments
-    private boolean initialExpand(Filelist.SegmentBuilder builder,
-                                  Iterable<Path> files)
+    private StatusResult<Set<FileInfo>> initialExpand(Iterable<Path> files)
     {
         boolean isOK = true;
+        Set<FileInfo> fileset = new HashSet<>();
 
         for (Path p : files) {
             try {
@@ -576,21 +648,45 @@ public class Sender implements RsyncTask,MessageHandler
                     _characterEncoder.encode(p.getFileName().toString());       // throws TextConversionException
 
                 FileInfo fileInfo = new FileInfo(p, p.getFileName(), nameBytes, attrs);          // throws IllegalArgumentException but that cannot happen
-                if (builder.contains(fileInfo)) { // O(n) not a problem unless a really large initial list of files
-                    if (_log.isLoggable(Level.WARNING)) {
-                        _log.warning("pruning duplicate " + fileInfo);
+                if (!_isRecursive && !_isTransferDirs &&
+                    fileInfo.attrs().isDirectory())
+                {
+                    if (_log.isLoggable(Level.INFO)) {
+                        _log.info("skipping directory " + fileInfo);
                     }
-                    isOK = false;  // should we possibly not treat this as an error? (if so also change print statement to debug)
-                    continue;
-                }
-                if (_log.isLoggable(Level.FINE)) {
-                    _log.fine(String.format("adding %s to segment", fileInfo));
-                }
-                builder.add(fileInfo);
-                if (fileInfo.isDotDir()) {
-                    boolean isExpandOK = expand(builder, fileInfo);
-                    isOK = isOK && isExpandOK;
-                    _nextSegmentIndex++; // we have to add it to be compliant with native, but don't try expanding it again later
+                } else {
+                    boolean isAdded = fileset.add(fileInfo);
+                    if (isAdded) {
+                        if (_log.isLoggable(Level.FINE)) {
+                            _log.fine(String.format("adding %s to segment",
+                                                    fileInfo));
+                        }
+                        if (fileInfo.isDotDir()) {
+                            if (_log.isLoggable(Level.FINE)) {
+                                _log.fine(String.format("expanding dot dir %s",
+                                                        fileInfo));
+                            }
+
+                            StatusResult<List<FileInfo>> expandResult =
+                                    expand(fileInfo);
+                            isOK = isOK && expandResult.isOK();
+                            for (FileInfo f2 : expandResult.value()) {
+                                boolean isAdded2 = fileset.add(f2);
+                                if (!isAdded2) {
+                                    if (_log.isLoggable(Level.WARNING)) {
+                                        _log.warning("pruning duplicate " + f2);
+                                    }
+                                    isOK = false;
+                                }
+                            }
+                            _nextSegmentIndex++; // we have to add it to be compliant with native, but don't try expanding it again later
+                        }
+                    } else {
+                        if (_log.isLoggable(Level.WARNING)) {
+                            _log.warning("pruning duplicate " + fileInfo);
+                        }
+                        isOK = false;  // should we possibly not treat this as an error? (if so also change print statement to debug)
+                    }
                 }
             } catch (IOException e) {
                 if (_log.isLoggable(Level.WARNING)) {
@@ -608,15 +704,14 @@ public class Sender implements RsyncTask,MessageHandler
             }
         }
 
-        return isOK;
+        return new StatusResult<Set<FileInfo>>(isOK, fileset);
     }
 
-    private boolean expand(Filelist.SegmentBuilder builder, FileInfo directory)
+    private StatusResult<List<FileInfo>> expand(FileInfo directory)
     {
-        assert _isRecursive;
-        assert builder != null;
         assert directory != null;
 
+        List<FileInfo> fileset = new ArrayList<>();
         boolean isOK = true;
         final Path localPart = getLocalPathOf(directory);                       // throws RuntimeException if unable to get local path prefix of directory, but that should never happen
 
@@ -654,9 +749,9 @@ public class Sender implements RsyncTask,MessageHandler
                 byte[] pathNameBytes =
                     _characterEncoder.encodeOrNull(relativePathName);
                 if (pathNameBytes != null) {
-                    FileInfo fi = new FileInfo(entry, relativePath,
-                                               pathNameBytes, attrs);    // throws IllegalArgumentException but that cannot happen
-                    builder.add(fi);
+                    FileInfo f = new FileInfo(entry, relativePath,
+                                              pathNameBytes, attrs);    // throws IllegalArgumentException but that cannot happen
+                    fileset.add(f);
                 } else {
                     if (_log.isLoggable(Level.WARNING)) {
                         _log.warning(String.format(
@@ -674,7 +769,7 @@ public class Sender implements RsyncTask,MessageHandler
             }
             isOK = false;
         }
-        return isOK;
+        return new StatusResult<List<FileInfo>>(isOK, fileset);
     }
 
     // TODO: FEATURE: (if possible in native) implement suspend/resume such that
@@ -710,13 +805,15 @@ public class Sender implements RsyncTask,MessageHandler
                 continue;
             }
 
-            Filelist.SegmentBuilder builder =
-                new Filelist.SegmentBuilder(directory);
-            boolean isExpandOK = expand(builder, directory);
+            StatusResult<List<FileInfo>> expandResult = expand(directory);
+            boolean isExpandOK = expandResult.isOK();
             if (!isExpandOK && _log.isLoggable(Level.WARNING)) {
                 _log.warning("initial file list expansion returned an error");
             }
 
+            Filelist.SegmentBuilder builder =
+                new Filelist.SegmentBuilder(directory);
+            builder.addAll(expandResult.value());
             Filelist.Segment segment = fileList.newSegment(builder);
 
             if (_log.isLoggable(Level.FINE)) {
@@ -754,6 +851,7 @@ public class Sender implements RsyncTask,MessageHandler
         return isOK;
     }
 
+    // flist.c:send_file_entry
     private void sendFileMetaData(FileInfo fileInfo) throws ChannelException
     {
         if (_log.isLoggable(Level.FINE)) {
@@ -775,7 +873,21 @@ public class Sender implements RsyncTask,MessageHandler
             _fileInfoCache.setPrevMode(mode);
         }
 
-        xflags |= TransmitFlags.SAME_UID;
+        User user = fileInfo.attrs().user();
+        if (_isPreserveUser &&
+            !user.equals(_fileInfoCache.getPrevUserOrNull()))
+        {
+            _fileInfoCache.setPrevUser(user);
+            if (!user.equals(User.root())) {
+                if (_isRecursive && !_transferredUserNames.contains(user)) {
+                    xflags |= TransmitFlags.USER_NAME_FOLLOWS;
+                } // else send in batch later
+                _transferredUserNames.add(user);
+            }
+        } else {
+            xflags |= TransmitFlags.SAME_UID;
+        }
+
         xflags |= TransmitFlags.SAME_GID;
 
         long lastModified = attrs.lastModifiedTime();
@@ -814,6 +926,9 @@ public class Sender implements RsyncTask,MessageHandler
         } else {
             _duplexChannel.putByte((byte) xflags);
         }
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("sent flags " + Integer.toBinaryString(xflags));
+        }
 
         if ((xflags & TransmitFlags.SAME_NAME) != 0) {
             _duplexChannel.putByte((byte) numPrefixBytes);
@@ -836,6 +951,13 @@ public class Sender implements RsyncTask,MessageHandler
             _duplexChannel.putInt(mode);
         }
 
+        if (_isPreserveUser && ((xflags & TransmitFlags.SAME_UID) == 0)) {
+            sendUserId(user.uid());
+            if ((xflags & TransmitFlags.USER_NAME_FOLLOWS) != 0) {
+                sendUserName(user.name());
+            }
+        }
+
         // TODO: assert fileName is equal to symbolic link name in native
         if (preserveLinks && attrs.isSymbolicLink()) {
             sendEncodedInt(fileNameBytes.length);
@@ -856,10 +978,14 @@ public class Sender implements RsyncTask,MessageHandler
         if (_log.isLoggable(Level.FINE)) {
             _log.fine("sending file list error notification to peer");
         }
-        _duplexChannel.putChar(
-            (char) (0xFFFF & (TransmitFlags.EXTENDED_FLAGS |
-                              TransmitFlags.IO_ERROR_ENDLIST)));
-        sendEncodedInt(IoError.GENERAL);
+        if (_isSafeFileList) {
+            _duplexChannel.putChar(
+                (char) (0xFFFF & (TransmitFlags.EXTENDED_FLAGS |
+                                  TransmitFlags.IO_ERROR_ENDLIST)));
+            sendEncodedInt(IoError.GENERAL);
+        } else {
+            _duplexChannel.putByte((byte) 0);
+        }
     }
 
     private void sendChecksumHeader(Checksum.Header header)
