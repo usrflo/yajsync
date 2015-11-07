@@ -19,6 +19,8 @@
  */
 package com.github.perlundq.yajsync.session;
 
+import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
@@ -34,22 +36,28 @@ import com.github.perlundq.yajsync.util.BitOps;
 public class ClientSessionConfig extends SessionConfig
 {
     public interface AuthProvider {
-        String getUser();
-        char[] getPassword();
+        String getUser() throws IOException;
+        char[] getPassword() throws IOException;
     }
 
     private static final Logger _log =
         Logger.getLogger(ClientSessionConfig.class.getName());
     private final boolean _isRecursive;
+    private boolean _isSafeFileList;
+    private final PrintStream _out;
+    private final PrintStream _err;
 
     /**
      * @throws IllegalArgumentException if charset is not supported
      */
-    private ClientSessionConfig(ReadableByteChannel in, WritableByteChannel out,
-                                Charset charset, boolean isRecursive)
+    public ClientSessionConfig(ReadableByteChannel in, WritableByteChannel out,
+                               Charset charset, boolean isRecursive,
+                               PrintStream stdout, PrintStream stderr)
     {
         super(in, out, charset);
         _isRecursive = isRecursive;
+        _out = stdout;
+        _err = stderr;
     }
 
     /**
@@ -59,38 +67,33 @@ public class ClientSessionConfig extends SessionConfig
      * @throws RsyncProtocolException if failing to encode/decode characters
      *         correctly
      */
-    public static ClientSessionConfig handshake(ReadableByteChannel in,
-                                                WritableByteChannel out,
-                                                Charset charset,
-                                                boolean isRecursive,
-                                                String moduleName,
-                                                Iterable<String> args,
-                                                AuthProvider authProvider)
-        throws ChannelException
+    public SessionStatus handshake(String moduleName,
+                                   Iterable<String> args,
+                                   AuthProvider authProvider)
+        throws RsyncException
     {
         try {
-            ClientSessionConfig instance = new ClientSessionConfig(in,
-                                                                   out,
-                                                                   charset,
-                                                                   isRecursive);
-
-            instance.exchangeProtocolVersion();
-            instance.sendModule(moduleName);
-            instance.printLinesAndGetReplyStatus(authProvider);
-            if (instance.status() != SessionStatus.OK) {
-                return instance;
+            exchangeProtocolVersion();
+            sendModule(moduleName);
+            printLinesAndGetReplyStatus(authProvider);
+            if (_status != SessionStatus.OK) {
+                return _status;
             }
 
             assert !moduleName.isEmpty();
-            instance.sendArguments(args);
-            instance.receiveCompatibilities();
-            instance.receiveChecksumSeed();
-            return instance;
+            sendArguments(args);
+            receiveCompatibilities();
+            receiveChecksumSeed();
+            return _status;
         } catch (TextConversionException e) {
             throw new RsyncProtocolException(e);
         }
     }
 
+    public boolean isSafeFileList()
+    {
+        return _isSafeFileList;
+    }
     /**
      * @throws TextConversionException
      */
@@ -100,7 +103,7 @@ public class ClientSessionConfig extends SessionConfig
     }
 
     private void printLinesAndGetReplyStatus(AuthProvider authProvider)
-        throws ChannelException
+        throws RsyncException
     {
         while (true) {
             String line = readLine();
@@ -111,7 +114,7 @@ public class ClientSessionConfig extends SessionConfig
                 _status = SessionStatus.EXIT;
                 return;
             } else if (line.startsWith(SessionStatus.ERROR.toString())) {
-                System.err.println(line);
+                _err.println(line);
                 _status = SessionStatus.ERROR;
                 return;
             } else if (line.startsWith(SessionStatus.AUTHREQ.toString())) {
@@ -119,26 +122,33 @@ public class ClientSessionConfig extends SessionConfig
                     line.substring(SessionStatus.AUTHREQ.toString().length());
                 sendAuthResponse(authProvider, challenge);
             } else {
-                System.out.println(line); // FIXME: don't hardcode System.out
+                _out.println(line);
             }
         }
     }
 
     /**
+     * @throws ChannelException
+     * @throws RsyncException if failing to provide a username and/or password
      * @throws TextConversionException
      */
     private void sendAuthResponse(AuthProvider authProvider, String challenge)
-        throws ChannelException
+        throws RsyncException
     {
-        String user = authProvider.getUser();
-        char[] password = authProvider.getPassword();
         try {
-            RsyncAuthContext authContext =
-                RsyncAuthContext.fromChallenge(_characterEncoder, challenge);
-            String response = authContext.response(password);
-            writeString(String.format("%s %s\n", user, response));
-        } finally {
-            Arrays.fill(password, (char) 0);
+            String user = authProvider.getUser();
+            char[] password = authProvider.getPassword();
+            try {
+                RsyncAuthContext authContext =
+                        RsyncAuthContext.fromChallenge(_characterEncoder,
+                                                       challenge);
+                String response = authContext.response(password);
+                writeString(String.format("%s %s\n", user, response));
+            } finally {
+                Arrays.fill(password, (char) 0);
+            }
+        } catch (IOException e) {
+            throw new RsyncException(e);
         }
     }
 
@@ -166,10 +176,7 @@ public class ClientSessionConfig extends SessionConfig
             throw new RsyncProtocolException("peer does not support " +
                                              "incremental recurse");
         }
-        if ((flags & RsyncCompatibilities.CF_SAFE_FLIST) == 0) {
-            throw new RsyncProtocolException("peer does not support " +
-                                             "safe file lists");
-        }
+        _isSafeFileList = (flags & RsyncCompatibilities.CF_SAFE_FLIST) != 0;
     }
 
     private void receiveChecksumSeed() throws ChannelException

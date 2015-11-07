@@ -19,8 +19,12 @@
  */
 package com.github.perlundq.yajsync.ui;
 
+import java.io.BufferedReader;
 import java.io.Console;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.net.UnknownHostException;
 import java.nio.channels.UnresolvedAddressException;
 import java.nio.charset.Charset;
@@ -43,6 +47,7 @@ import com.github.perlundq.yajsync.channels.net.ChannelFactory;
 import com.github.perlundq.yajsync.channels.net.DuplexByteChannel;
 import com.github.perlundq.yajsync.channels.net.SSLChannelFactory;
 import com.github.perlundq.yajsync.channels.net.StandardChannelFactory;
+import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
 import com.github.perlundq.yajsync.session.ClientSessionConfig;
 import com.github.perlundq.yajsync.session.RsyncClientSession;
 import com.github.perlundq.yajsync.session.RsyncException;
@@ -53,6 +58,7 @@ import com.github.perlundq.yajsync.util.ArgumentParser;
 import com.github.perlundq.yajsync.util.ArgumentParsingError;
 import com.github.perlundq.yajsync.util.Consts;
 import com.github.perlundq.yajsync.util.Environment;
+import com.github.perlundq.yajsync.util.FileOps;
 import com.github.perlundq.yajsync.util.Option;
 import com.github.perlundq.yajsync.util.PathOps;
 import com.github.perlundq.yajsync.util.Util;
@@ -106,7 +112,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                 (port < PORT_MIN || port > PORT_MAX)) {
                 throw new ArgumentParsingError(
                     String.format("illegal port %d - must be within the range" +
-                                  " [%d, %d]", PORT_MIN, PORT_MAX));
+                                  " [%d, %d]", port, PORT_MIN, PORT_MAX));
             }
             if (!address.isEmpty() &&
                 moduleName.isEmpty() && !pathName.isEmpty()) {
@@ -120,8 +126,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             _moduleName = moduleName;
 
             if (address.isEmpty()) {
-                assert userName.isEmpty() && moduleName.isEmpty() &&
-                       port == PORT_UNDEFINED;
+                assert moduleName.isEmpty();
                 _pathName = toLocalPathName(pathName);
             } else {
                 _pathName = toRemotePathName(moduleName, pathName);
@@ -236,13 +241,15 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
     private boolean _isModuleListing;
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
+    private boolean _isPreserveUser;
+    private boolean _isIgnoreTimes;
     private boolean _isRecursiveTransfer;
     private boolean _isRemote;
     private boolean _isSender;
     private boolean _isShowStatistics;
     private int _remotePort = Consts.DEFAULT_LISTEN_PORT;
     private int _verbosity = 0;
-    private List<String> _srcArgs = new LinkedList<>();
+    private final List<String> _srcArgs = new LinkedList<>();
     private Statistics _statistics;
     private String _address;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
@@ -250,6 +257,28 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
     private String _moduleName;
     private String _userName;
     private boolean _isTLS;
+    private boolean _isTransferDirs = false;
+    private boolean _readStdin = false;
+    private String _passwordFile;
+    private PrintStream _out = System.out;
+    private PrintStream _err = System.err;
+
+    public YajSyncClient setStandardOut(PrintStream out)
+    {
+        _out = out;
+        return this;
+    }
+
+    public YajSyncClient setStandardErr(PrintStream err)
+    {
+        _err = err;
+        return this;
+    }
+
+    public Statistics statistics()
+    {
+        return _statistics;
+    }
 
     @Override
     public String getUser()
@@ -257,16 +286,37 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         return _userName;
     }
 
-    // TODO: add support for reading password from other sources than the console
     @Override
-    public char[] getPassword()
+    public char[] getPassword() throws IOException
     {
+        if (_passwordFile != null) {
+            if (!_passwordFile.equals("-")) {
+                RsyncFileAttributes attrs =
+                    RsyncFileAttributes.stat(Paths.get(_passwordFile));
+                if ((attrs.mode() & (FileOps.S_IROTH | FileOps.S_IWOTH)) != 0) {
+                    throw new IOException(String.format(
+                            "insecure permissions on %s: %s",
+                            _passwordFile, attrs));
+                }
+            }
+            try (BufferedReader br = new BufferedReader(
+                    _passwordFile.equals("-")
+                    ? new InputStreamReader(System.in)
+                    : new FileReader(_passwordFile))) {
+                return br.readLine().toCharArray();
+            }
+        }
+
+        String passwordStr = Environment.getRsyncPasswordOrNull();
+        if (passwordStr != null) {
+            return passwordStr.toCharArray();
+        }
+
         Console console = System.console();
         if (console == null) {
-            return "".toCharArray();
+            throw new IOException("no console available");
         }
-        char[] password = console.readPassword("Password: ");
-        return password;
+        return console.readPassword("Password: ");
     }
 
     private Iterable<Option> options()
@@ -278,8 +328,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                                    String.format("which charset to use " +
                                                  "(default %s)",
                                                  _charset),
-            new Option.Handler() {
-                @Override public void handle(Option option)
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option)
                     throws ArgumentParsingError {
                     String charsetName = (String) option.getValue();
                     try {
@@ -300,12 +350,25 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
 
         options.add(
             Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                      "dirs", "d",
+                                      String.format("transfer directories " +
+                                                    "without recursing " +
+                                                    "(default %s)",
+                                                    _isTransferDirs),
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
+                    _isTransferDirs = true;
+                }
+            }));
+
+        options.add(
+            Option.newWithoutArgument(Option.Policy.OPTIONAL,
                                       "recursive", "r",
                                       String.format("recurse into directories" +
                                                     " (default %s)",
                                                     _isRecursiveTransfer),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _isRecursiveTransfer  = true;
                 }}));
 
@@ -315,8 +378,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                                       String.format("output verbosity " +
                                                     "(default %d)",
                                                     _verbosity),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _verbosity++;
                 }}));
 
@@ -326,8 +389,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                                       String.format("preserve file " +
                                                     "permissions (default %s)",
                                                     _isPreservePermissions),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _isPreservePermissions = true;
                 }}));
 
@@ -338,28 +401,69 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                                                     "modification time " +
                                                     "(default %s)",
                                                     _isPreserveTimes),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _isPreserveTimes  = true;
                 }}));
 
         options.add(
             Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                      "owner", "o",
+                                      String.format("preserve owner " +
+                                                    "(default %s)",
+                                                    _isPreserveUser),
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
+                    _isPreserveUser  = true;
+                }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "ignore-times", "I",
+                                          String.format("don't skip files that match size and time " +
+                                                        "(default %s)",
+                                                        _isIgnoreTimes),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        _isIgnoreTimes  = true;
+                    }}));
+
+        options.add(
+            Option.newWithoutArgument(Option.Policy.OPTIONAL,
                                       "stats", "",
                                       "show file transfer statistics",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _isShowStatistics = true;
                 }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                       "password-file", "",
+                                       "read daemon-access password from " +
+                                       "specified file (where `-' is stdin)",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        _passwordFile = (String) option.getValue();
+                    }}));
 
         options.add(
             Option.newIntegerOption(Option.Policy.OPTIONAL,
                                     "port", "",
                                     String.format("server port number " +
                                                   "(default %d)", _remotePort),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _remotePort = (int) option.getValue();
+                }}));
+
+        options.add(
+            Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                      "stdin", "",
+                                      "read list of source files from stdin",
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
+                    _readStdin = true;
                 }}));
 
         String deferredWriteHelp = String.format(
@@ -372,8 +476,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         options.add(
             Option.newWithoutArgument(Option.Policy.OPTIONAL,
                                       "defer-write", "", deferredWriteHelp,
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _isDeferredWrite = true;
                 }}));
 
@@ -383,8 +487,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                                                             "over TLS/SSL " +
                                                             "(default %s)",
                                                             _isTLS),
-            new Option.Handler() {
-            @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+            @Override public void handleAndContinue(Option option) {
                 _isTLS = true;
                 // SSLChannel.read and SSLChannel.write depends on
                 // ByteBuffer.array and ByteBuffer.arrayOffset. Disable direct
@@ -428,7 +532,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             if (prevArg != null && !arg.isSameUserHostPortAs(prevArg)) {
                 throw new ArgumentParsingError(
                     String.format("remote source arguments %s and %s are " +
-                                  "incompatble", prevArg, arg));
+                                  "incompatible", prevArg, arg));
             }
             if (!arg._pathName.isEmpty()) {
                 _srcArgs.add(arg._pathName);
@@ -463,15 +567,14 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             _remotePort = remoteArg._port;
         }
 
-        String userName = remoteArg._userName.isEmpty()
+        _userName = remoteArg._userName.isEmpty()
                               ? Environment.getUserName()
                               : remoteArg._userName;
-        _userName = userName;
     }
 
     private void showStatistics(Statistics stats)
     {
-        System.out.format("Number of files: %d%n" +
+        _out.format("Number of files: %d%n" +
             "Number of files transferred: %d%n" +
             "Total file size: %d bytes%n" +
             "Total transferred file size: %d bytes%n" +
@@ -495,22 +598,43 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             stats.totalRead());
     }
 
-    public void start(String[] args)
+    public int start(String[] args)
     {
         ArgumentParser argsParser =
             ArgumentParser.newWithUnnamed(getClass().getSimpleName(),
                                           "files...");
-        argsParser.addHelpTextDestination(System.out);
+        argsParser.addHelpTextDestination(_out);
         try {
             for (Option o : options()) {
                 argsParser.add(o);
             }
-            argsParser.parse(Arrays.asList(args));                              // TODO: print warning for any not applicable option (e.g. defer-write for sender)
-            parseUnnamedArgs(argsParser.getUnnamedArguments());
+            ArgumentParser.Status rc = argsParser.parse(Arrays.asList(args));
+            if (rc != ArgumentParser.Status.CONTINUE) {
+                return rc == ArgumentParser.Status.EXIT_OK ? 0 : 1;
+            }
+            if (_readStdin) {
+                List<String> srcArgs = new LinkedList<>();
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(System.in))) {
+                    while (true) {
+                        String line = br.readLine();
+                        if (line == null) {
+                            break;
+                        }
+                        srcArgs.add(line);
+                    }
+                }
+                srcArgs.addAll(argsParser.getUnnamedArguments());
+                parseUnnamedArgs(srcArgs);
+            } else {
+                parseUnnamedArgs(argsParser.getUnnamedArguments());
+            }
         } catch (ArgumentParsingError e) {
-            System.err.println(e.getMessage());
-            System.err.println(argsParser.toUsageString());
-            System.exit(1);
+            _err.println(e.getMessage());
+            _err.println(argsParser.toUsageString());
+            return -1;
+        } catch (IOException e) {
+            _err.println(e.getMessage());
+            return -1;
         }
 
         Level logLevel = Util.getLogLevelForNumber(Util.WARNING_LOG_LEVEL_NUM +
@@ -531,9 +655,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             if (_log.isLoggable(Level.INFO)) {
                 _log.info("exit status: " + (isOK ? "OK" : "ERROR"));
             }
-            if (!isOK) {
-                System.exit(1);
-            }
+            return isOK ? 0 : -1;
         } finally {
             executor.shutdown();
         }
@@ -551,8 +673,11 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         session.setIsModuleListing(_isModuleListing);
         session.setIsPreservePermissions(_isPreservePermissions);
         session.setIsPreserveTimes(_isPreserveTimes);
+        session.setIsPreserveUser(_isPreserveUser);
+        session.setIsIgnoreTimes(_isIgnoreTimes);
         session.setIsRecursiveTransfer(_isRecursiveTransfer);
         session.setIsSender(_isSender);
+        session.setIsTransferDirs(_isTransferDirs);
 
         ChannelFactory socketFactory = _isTLS ? new SSLChannelFactory()
                                               : new StandardChannelFactory();
@@ -570,7 +695,9 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                                         _dstArg,
                                         this,           // ClientSessionConfig.AuthProvider
                                         _moduleName,
-                                        isInterruptible);
+                                        isInterruptible,
+                                        _out,
+                                        _err);
         } catch (UnknownHostException | UnresolvedAddressException e) {
             if (_log.isLoggable(Level.SEVERE)) {
                 _log.severe(String.format("Error: failed to resolve %s (%s)",
@@ -613,17 +740,21 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         RsyncLocal localTransfer = new RsyncLocal();
         localTransfer.setCharset(_charset);
         localTransfer.setVerbosity(_verbosity);
+        localTransfer.setIsModuleListing(_isModuleListing);
         localTransfer.setIsRecursiveTransfer(_isRecursiveTransfer);
         localTransfer.setIsPreservePermissions(_isPreservePermissions);
         localTransfer.setIsPreserveTimes(_isPreserveTimes);
+        localTransfer.setIsPreserveUser(_isPreserveUser);
+        localTransfer.setIsIgnoreTimes(_isIgnoreTimes);
         localTransfer.setIsDeferredWrite(_isDeferredWrite);
+        localTransfer.setIsTransferDirs(_isTransferDirs);
         List<Path> srcPaths = new LinkedList<>();
         for (String pathName : _srcArgs) {
             srcPaths.add(Paths.get(pathName));                                  // throws InvalidPathException
         }
 
         try {
-            return localTransfer.transfer(executor, srcPaths, _dstArg);
+            return localTransfer.transfer(executor, _out, srcPaths, _dstArg);
         } catch (ChannelException e) {
             if (_log.isLoggable(Level.SEVERE)) {
                 _log.severe("Error: communication closed with peer: " +
@@ -649,6 +780,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                            "there might be data corruption bugs hiding. So " +
                            "use it only carefully at your own risk.");
 
-        new YajSyncClient().start(args);
+        int rc = new YajSyncClient().start(args);
+        System.exit(rc);
     }
 }

@@ -21,6 +21,7 @@
 package com.github.perlundq.yajsync.session;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
@@ -82,10 +83,13 @@ public class Generator implements RsyncTask
     private final SimpleDateFormat _compatibleTimeFormatter =
         new SimpleDateFormat("yyyy/MM/dd HH:mm:ss");
     private final List<Filelist.Segment> _generated = new LinkedList<>();
+    private final PrintStream _out;
     private boolean _isAlwaysItemize;
     private boolean _isRecursive;
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
+    private boolean _isPreserveUser;
+    private boolean _isIgnoreTimes;
     private boolean _isListOnly;
     private Filelist _fileList;  // effectively final
     private int _returnStatus ;
@@ -101,27 +105,29 @@ public class Generator implements RsyncTask
     }
 
     public Generator(WritableByteChannel out, Charset charset,
-                     byte[] checksumSeed)
+                     byte[] checksumSeed, PrintStream stdout)
     {
 
         _senderOutChannel = new RsyncOutChannel(out, OUTPUT_CHANNEL_BUF_SIZE);
         _checksumSeed = checksumSeed;
         _characterDecoder = TextDecoder.newStrict(charset);
         _characterEncoder = TextEncoder.newStrict(charset);
+        _out = stdout;
     }
 
     public static Generator newServerInstance(WritableByteChannel out,
                                               Charset charset,
                                               byte[] checksumSeed)
     {
-        return new Generator(out, charset, checksumSeed).setIsListOnly(false);
+        return new Generator(out, charset, checksumSeed, null).setIsListOnly(false);
     }
 
     public static Generator newClientInstance(WritableByteChannel out,
                                               Charset charset,
-                                              byte[] checksumSeed)
+                                              byte[] checksumSeed,
+                                              PrintStream stdout)
     {
-        return new Generator(out, charset, checksumSeed);
+        return new Generator(out, charset, checksumSeed, stdout);
     }
 
     public Generator setIsRecursive(boolean isRecursive)
@@ -145,6 +151,18 @@ public class Generator implements RsyncTask
     public Generator setIsPreserveTimes(boolean isPreserveTimes)
     {
         _isPreserveTimes = isPreserveTimes;
+        return this;
+    }
+
+    public Generator setIsPreserveUser(boolean isPreserveUser)
+    {
+        _isPreserveUser = isPreserveUser;
+        return this;
+    }
+
+    public Generator setIsIgnoreTimes(boolean isIgnoreTimes)
+    {
+        _isIgnoreTimes = isIgnoreTimes;
         return this;
     }
 
@@ -360,7 +378,14 @@ public class Generator implements RsyncTask
             @Override
             public void process() throws ChannelException {
                 if (_isListOnly) {
-                    listSegment(segment);
+                    if (!_isRecursive) {
+                        listFullSegment(segment);
+                    } else if (segment.directory() == null) {
+                        listInitialSegmentRecursive(segment);
+                    } else {
+                        listSegmentRecursive(segment);
+                    }
+                    segment.removeAll();
                 } else {
                     sendChecksumForSegment(segment);
                 }
@@ -515,21 +540,42 @@ public class Generator implements RsyncTask
 //                                           TimeUnit.SECONDS),
     }
 
-    private void listSegment(Filelist.Segment segment)
+    private void listFullSegment(Filelist.Segment segment)
     {
-        FileInfo dir = segment.directory();
-        boolean listFirstDir = dir == null; // dir is only null for initial file list
-        if (dir != null) {
-            System.out.println(listFileInfo(dir)); // FIXME: don't hardcode System.out?
-        }
+        assert !_isRecursive;
+        assert segment.directory() == null;
         for (FileInfo f : segment.files()) {
-            if (!_isRecursive ||
-                !f.attrs().isDirectory() || listFirstDir) {
-                System.out.println(listFileInfo(f));
-                listFirstDir = false;
+            _out.println(listFileInfo(f));
+        }
+    }
+
+    private void listInitialSegmentRecursive(Filelist.Segment segment)
+    {
+        assert _isRecursive;
+        assert segment.directory() == null;
+        boolean listFirstDotDir = true;
+        for (FileInfo f : segment.files()) {
+            if (!f.attrs().isDirectory()) {
+                _out.println(listFileInfo(f));
+            } else if (listFirstDotDir) {
+                if (f.isDotDir()) {
+                    _out.println(listFileInfo(f));
+                }
+                listFirstDotDir = false;
             }
         }
-        segment.removeAll();
+    }
+
+    private void listSegmentRecursive(Filelist.Segment segment)
+    {
+        assert _isRecursive;
+        assert segment.directory() != null;
+        _out.println(listFileInfo(segment.directory()));
+        for (FileInfo f : segment.files()) {
+            if (!f.attrs().isDirectory()) {
+                _out.println(listFileInfo(f));
+            }
+        }
     }
 
     private void sendChecksumForSegment(Filelist.Segment segment)
@@ -752,6 +798,42 @@ public class Generator implements RsyncTask
             FileOps.setLastModifiedTime(path, targetAttrs.lastModifiedTime(),
                                         LinkOption.NOFOLLOW_LINKS);
         }
+        // NOTE: keep this one last in the method, in case we fail due to
+        //       insufficient permissions (the other ones are more likely to
+        //       succeed).
+        // NOTE: we cannot detect if we have the capabilities to change
+        //       ownership (knowing if UID 0 is not sufficient)
+        // TODO: fall back to changing uid (find out how rsync works) if name
+        //       change fails
+        if (_isPreserveUser && !targetAttrs.user().name().isEmpty() &&
+            (curAttrs == null ||
+             !curAttrs.user().name().equals(targetAttrs.user().name())))
+        {
+            if (_log.isLoggable(Level.FINE)) {
+                _log.fine(String.format(
+                    "(Generator) updating ownership %s -> %s on %s",
+                    curAttrs == null ? "" : curAttrs.user(),
+                    targetAttrs.user(), path));
+            }
+            // NOTE: side effect of chown in Linux is that set user/group id bit
+            //       might be cleared.
+            FileOps.setOwner(path, targetAttrs.user(),
+                             LinkOption.NOFOLLOW_LINKS);
+        } else if (_isPreserveUser && targetAttrs.user().name().isEmpty() &&
+            (curAttrs == null ||
+             curAttrs.user().uid() != targetAttrs.user().uid()))
+        {
+            if (_log.isLoggable(Level.FINE)) {
+                _log.fine(String.format(
+                    "(Generator) updating uid %s -> %d on %s",
+                    curAttrs == null ? "" : curAttrs.user().uid(),
+                    targetAttrs.user().uid(), path));
+            }
+            // NOTE: side effect of chown in Linux is that set user/group id bit
+            //       might be cleared.
+            FileOps.setUserId(path, targetAttrs.user().uid(),
+                              LinkOption.NOFOLLOW_LINKS);
+        }
     }
 
     private void deferUpdateAttrsIfDiffer(final Path path,
@@ -784,7 +866,7 @@ public class Generator implements RsyncTask
         throws ChannelException
     {
         // NOTE: native opens the file first though even if its file size is zero
-        if (isDataModified(fileInfo.attrs(), curAttrs)) {
+        if (isDataModified(fileInfo.attrs(), curAttrs) || _isIgnoreTimes) {
             if (curAttrs == null) {
                 sendItemizeInfo(index, curAttrs, fileInfo.attrs(),
                                 Item.TRANSFER);
@@ -828,6 +910,9 @@ public class Generator implements RsyncTask
             curAttrs.lastModifiedTime() != targetAttrs.lastModifiedTime())
         {
             iFlags |= Item.REPORT_TIME;
+        }
+        if (_isPreserveUser && !curAttrs.user().equals(targetAttrs.user())) {
+            iFlags |= Item.REPORT_OWNER;
         }
         if (curAttrs.isRegularFile() && curAttrs.size() != targetAttrs.size()) {
             iFlags |= Item.REPORT_SIZE;
