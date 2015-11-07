@@ -18,11 +18,29 @@
  */
 package com.github.perlundq.yajsync.util;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
 public class Option
 {
     public interface Handler
     {
-        void handle(Option option) throws ArgumentParsingError;
+        ArgumentParser.Status handle(Option option) throws ArgumentParsingError;
+    }
+
+    public static abstract class ContinuingHandler implements Handler
+    {
+        @Override
+        public ArgumentParser.Status handle(Option option)
+            throws ArgumentParsingError
+        {
+            handleAndContinue(option);
+            return ArgumentParser.Status.CONTINUE;
+        }
+
+        public abstract void handleAndContinue(Option option)
+            throws ArgumentParsingError;
     }
 
     public enum Policy { OPTIONAL, REQUIRED }
@@ -86,7 +104,24 @@ public class Option
                           handler);
     }
 
-    public void setValue(String str) throws ArgumentParsingError
+    public static Option newPathOption(Policy policy,
+                                       String longName, String shortName,
+                                       String shortHelp, Handler handler)
+    {
+        return new Option(Path.class, policy, longName, shortName, shortHelp,
+                          handler);
+    }
+
+    public static Option newHelpOption(Handler handler)
+    {
+        return Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                         "help", "h",
+                                         "show this help text",
+                                         handler);
+    }
+
+    public ArgumentParser.Status setValue(String str)
+        throws ArgumentParsingError
     {
         try {
             if (_type == Void.class) {
@@ -103,7 +138,21 @@ public class Option
                         "%s expects an argument%nExample: %s",
                         name(), exampleUsageToString()));
                 }
-                _value = str;
+                _value = str.replaceAll("^\"|\"$", "");
+            } else if (_type == Path.class) {
+                if (str.isEmpty()) {
+                    throw new ArgumentParsingError(String.format(
+                        "%s expects an argument%nExample: %s",
+                        name(), exampleUsageToString()));
+                }
+                str = str.replaceAll("^\"|\"$", "");
+                Path path = Paths.get(str);
+                if (!Files.exists(path)) {
+                    throw new ArgumentParsingError(String.format(
+                            "%s expects an existing path",
+                            name()));
+                }
+                _value = path;
             } else {
                 throw new IllegalStateException(String.format(
                     "BUG: %s is of an unsupported type to %s%nExample: %s",
@@ -111,8 +160,9 @@ public class Option
             }
             _numInstances++;
             if (_handler != null) {
-                _handler.handle(this);
+                return _handler.handle(this);
             }
+            return ArgumentParser.Status.CONTINUE;
         } catch (NumberFormatException e) {
             throw new ArgumentParsingError(String.format("%s - invalid value" +
                                                          " %s%n%s%nExample: %s",

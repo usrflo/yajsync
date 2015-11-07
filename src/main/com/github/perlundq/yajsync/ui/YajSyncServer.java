@@ -20,6 +20,7 @@
 package com.github.perlundq.yajsync.ui;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.Charset;
@@ -29,6 +30,7 @@ import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -69,8 +71,33 @@ public class YajSyncServer
     private InetAddress _address = InetAddress.getLoopbackAddress();
     private ModuleProvider _moduleProvider = ModuleProvider.getDefault();
     private ExecutorService _executor;
+    private CountDownLatch _isListeningLatch;
+    private PrintStream _out = System.out;
+    private PrintStream _err = System.err;
 
     public YajSyncServer() {}
+
+    public YajSyncServer setStandardOut(PrintStream out)
+    {
+        _out = out;
+        return this;
+    }
+
+    public YajSyncServer setStandardErr(PrintStream err)
+    {
+        _err = err;
+        return this;
+    }
+
+    public YajSyncServer setIsListeningLatch(CountDownLatch isListeningLatch) {
+        _isListeningLatch = isListeningLatch;
+        return this;
+    }
+
+    public void setModuleProvider(ModuleProvider moduleProvider)
+    {
+        _moduleProvider = moduleProvider;
+    }
 
     private Iterable<Option> options()
     {
@@ -80,9 +107,9 @@ public class YajSyncServer
                                            String.format("which charset to " +
                                                          "use (default %s)",
                                                          _charset),
-            new Option.Handler() {
+            new Option.ContinuingHandler() {
                 @Override
-                public void handle(Option option) throws ArgumentParsingError {
+                public void handleAndContinue(Option option) throws ArgumentParsingError {
                     String charsetName = (String) option.getValue();
                     try {
                         _charset = Charset.forName(charsetName);
@@ -106,8 +133,8 @@ public class YajSyncServer
                                               String.format("output verbosity" +
                                                             " (default %d)",
                                                             _verbosity),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _verbosity++;
                 }}));
 
@@ -116,8 +143,8 @@ public class YajSyncServer
                                            String.format("address to bind to" +
                                                          "(default %s)",
                                                          _address),
-            new Option.Handler() {
-                @Override public void handle(Option option) throws ArgumentParsingError {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) throws ArgumentParsingError {
                     try {
                         _address = InetAddress.getByName((String) option.getValue());
                     } catch (UnknownHostException e) {
@@ -130,8 +157,8 @@ public class YajSyncServer
                                             String.format("port number to " +
                                                           "listen on (default" +
                                                           " %d)", _port),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _port = (int) option.getValue();
                 }}));
 
@@ -140,8 +167,8 @@ public class YajSyncServer
                                             String.format("size of thread " +
                                                           "pool (default %d)",
                                                           _numThreads),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _numThreads = (int) option.getValue();
                 }}));
 
@@ -154,8 +181,8 @@ public class YajSyncServer
         options.add(Option.newWithoutArgument(Option.Policy.OPTIONAL,
                                               "defer-write", "",
                                               deferredWriteHelp,
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _isDeferredWrite = true;
                 }}));
 
@@ -165,8 +192,8 @@ public class YajSyncServer
                                                             "over TLS/SSL " +
                                                             "(default %s)",
                                                             _isTLS),
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _isTLS = true;
                     // SSLChannel.read and SSLChannel.write depends on
                     // ByteBuffer.array and ByteBuffer.arrayOffset. Disable
@@ -251,23 +278,26 @@ public class YajSyncServer
         };
     }
 
-    public void start(String[] args) throws IOException, InterruptedException
+    public int start(String[] args) throws IOException, InterruptedException
     {
         ArgumentParser argsParser =
             ArgumentParser.newNoUnnamed(getClass().getSimpleName());
         try {
-            argsParser.addHelpTextDestination(System.out);
+            argsParser.addHelpTextDestination(_out);
             for (Option o : options()) {
                 argsParser.add(o);
             }
             for (Option o : _moduleProvider.options()) {
                 argsParser.add(o);
             }
-            argsParser.parse(Arrays.asList(args));                              // throws ArgumentParsingError
+            ArgumentParser.Status rc = argsParser.parse(Arrays.asList(args));   // throws ArgumentParsingError
+            if (rc != ArgumentParser.Status.CONTINUE) {
+                return rc == ArgumentParser.Status.EXIT_OK ? 0 : 1;
+            }
         } catch (ArgumentParsingError e) {
-            System.err.println(e.getMessage());
-            System.err.println(argsParser.toUsageString());
-            System.exit(1);
+            _err.println(e.getMessage());
+            _err.println(argsParser.toUsageString());
+            return -1;
         }
 
         Level logLevel = Util.getLogLevelForNumber(Util.WARNING_LOG_LEVEL_NUM +
@@ -284,18 +314,28 @@ public class YajSyncServer
         _executor = Executors.newFixedThreadPool(_numThreads);
 
         try (ServerChannel listenSock = socketFactory.open(_address, _port)) {  // throws IOException
+
+            if (_isListeningLatch!=null) {
+                _isListeningLatch.countDown();
+            }
+
             while (true) {
                 DuplexByteChannel sock = listenSock.accept();                   // throws IOException
                 Callable<Boolean> c = createCallable(sock, isInterruptible);
                 _executor.submit(c);                                            // NOTE: result discarded
             }
         } finally {
-            System.err.println("shutting down");
+            if (_log.isLoggable(Level.INFO)) {
+                _log.info("shutting down...");
+            }
             _executor.shutdown();
             _moduleProvider.close();
             while (!_executor.awaitTermination(5, TimeUnit.MINUTES)) {
-                System.err.println("some sessions are still running, waiting " +
-                                   "for them to finish before exiting");
+                _log.info("some sessions are still running, waiting for them " +
+                          "to finish before exiting");
+            }
+            if (_log.isLoggable(Level.INFO)) {
+                _log.info("done");
             }
         }
     }

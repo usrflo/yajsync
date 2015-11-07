@@ -19,17 +19,19 @@
  */
 package com.github.perlundq.yajsync.session;
 
+import java.io.PrintStream;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.session.ClientSessionConfig.AuthProvider;
 import com.github.perlundq.yajsync.text.Text;
+import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
 
 public class RsyncClientSession
 {
@@ -38,10 +40,18 @@ public class RsyncClientSession
     private boolean _isPreserveTimes;
     private boolean _isRecursiveTransfer;
     private boolean _isSender;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
     private int _verbosity;
     private Statistics _statistics = new Statistics();
     private boolean _isPreservePermissions;
+    private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
+    private boolean _isIgnoreTimes;
+    private boolean _isTransferDirs;
 
     public RsyncClientSession() {}
 
@@ -54,6 +64,30 @@ public class RsyncClientSession
     public RsyncClientSession setIsPreserveTimes(boolean isPreservedTimes)
     {
         _isPreserveTimes = isPreservedTimes;
+        return this;
+    }
+
+    public RsyncClientSession setIsPreserveUser(boolean isPreserveUser)
+    {
+        _isPreserveUser = isPreserveUser;
+        return this;
+    }
+
+    public RsyncClientSession setIsPreserveGroup(boolean isPreserveGroup)
+    {
+        _isPreserveGroup = isPreserveGroup;
+        return this;
+    }
+
+    public RsyncClientSession setIsNumericIds(boolean isNumericIds)
+    {
+    	_isNumericIds = isNumericIds;
+        return this;
+    }
+
+    public RsyncClientSession setIsIgnoreTimes(boolean isIgnoreTimes)
+    {
+        _isIgnoreTimes = isIgnoreTimes;
         return this;
     }
 
@@ -87,6 +121,30 @@ public class RsyncClientSession
         return this;
     }
 
+    public RsyncClientSession setIsDelete(boolean isDelete)
+    {
+        _isDelete = isDelete;
+        return this;
+    }
+
+    public RsyncClientSession setIsDeleteExcluded(boolean isDeleteExcluded)
+    {
+        _isDeleteExcluded = isDeleteExcluded;
+        return this;
+    }
+
+    public RsyncClientSession setFilterRuleConfiguration(
+    		FilterRuleConfiguration filterRuleConfiguration) {
+    	_filterRuleConfiguration = filterRuleConfiguration;
+    	return this;
+    }
+
+    public RsyncClientSession setIsTransferDirs(boolean isTransferDirs)
+    {
+        _isTransferDirs = isTransferDirs;
+        return this;
+    }
+
     public Statistics statistics()
     {
         return _statistics;
@@ -105,14 +163,23 @@ public class RsyncClientSession
         for (int i = 0; i < _verbosity; i++) {
             sb.append("v");
         }
-        if (_isModuleListing) {
-//            sb.append("d");        // FIXME: BUG: is this really correct
+        if (_isTransferDirs || _isModuleListing && !_isRecursiveTransfer) {
+            sb.append("d");
         }
         if (_isPreservePermissions) {
             sb.append("p");
         }
         if (_isPreserveTimes) {
             sb.append("t");
+        }
+        if (_isPreserveUser) {
+            sb.append("o");
+        }
+        if (_isPreserveGroup) {
+            sb.append("g");
+        }
+        if (_isIgnoreTimes) {
+            sb.append("I");
         }
         if (_isRecursiveTransfer) {
             sb.append("r");
@@ -127,6 +194,16 @@ public class RsyncClientSession
         sb.append("f");
         // revisit if we add support for --iconv
         serverArgs.add(sb.toString());
+
+        if (_isNumericIds) {
+        	serverArgs.add("--numeric-ids");
+        }
+        if (_isDelete) {
+        	serverArgs.add("--delete");
+        }
+        if (_isDeleteExcluded) {
+        	serverArgs.add("--delete-excluded");
+        }
 
         serverArgs.add("."); // arg delimiter
 
@@ -143,7 +220,7 @@ public class RsyncClientSession
     {
         List<Path> result = new LinkedList<>();
         for (String pathName : pathNames) {
-            result.add(Paths.get(pathName));
+            result.add(CustomFileSystem.getPath(pathName));
         }
         return result;
     }
@@ -155,22 +232,25 @@ public class RsyncClientSession
                             String dstArg,
                             AuthProvider authProvider,
                             String moduleName,
-                            boolean isChannelsInterruptible)
+                            boolean isChannelsInterruptible,
+                            PrintStream stdout,
+                            PrintStream stderr)
         throws RsyncException, InterruptedException
     {
         List<String> serverArgs = createServerArgs(srcArgs, dstArg);
-        ClientSessionConfig cfg =                                               // throws IllegalArgumentException if _charset is not supported
-            ClientSessionConfig.handshake(in,
-                                          out,
-                                          _charset,
-                                          _isRecursiveTransfer,
-                                          moduleName,
-                                          serverArgs,
-                                          authProvider);
+        ClientSessionConfig cfg = new ClientSessionConfig(in,
+                                                          out,
+                                                          _charset,
+                                                          _isRecursiveTransfer,
+                                                          stdout,
+                                                          stderr);
 
-        if (cfg.status() == SessionStatus.ERROR) {
+        SessionStatus status = cfg.handshake(moduleName, serverArgs,
+                                             authProvider);
+
+        if (status == SessionStatus.ERROR) {
             return false;
-        } else if (cfg.status() == SessionStatus.EXIT) {
+        } else if (status == SessionStatus.EXIT) {
             return true;
         }
 
@@ -182,31 +262,49 @@ public class RsyncClientSession
                                                      _charset,
                                                      cfg.checksumSeed()).
                 setIsRecursive(_isRecursiveTransfer).
-                setIsInterruptible(isChannelsInterruptible);
+                setIsPreserveUser(_isPreserveUser).
+                setIsInterruptible(isChannelsInterruptible).
+                setIsSafeFileList(cfg.isSafeFileList()).
+                setFilterRuleConfiguration(_filterRuleConfiguration);
+            boolean isTransferDirs = _isTransferDirs ||
+                                     _isModuleListing && !_isRecursiveTransfer;
+            sender.setIsTransferDirs(isTransferDirs);
             boolean isOK = RsyncTaskExecutor.exec(executor, sender);
             _statistics = sender.statistics();
             return isOK;
         } else {
             Generator generator =
                 Generator.newClientInstance(out, cfg.charset(),
-                                            cfg.checksumSeed()).
+                                            cfg.checksumSeed(),
+                                            stdout).
                     setIsRecursive(_isRecursiveTransfer).
                     setIsPreservePermissions(_isPreservePermissions).
                     setIsPreserveTimes(_isPreserveTimes).
+                    setIsPreserveUser(_isPreserveUser).
+                    setIsPreserveGroup(_isPreserveGroup).
+                    setIsNumericIds(_isNumericIds).
+                    setIsIgnoreTimes(_isIgnoreTimes).
                     setIsAlwaysItemize(_verbosity > 1).
                     setIsListOnly(_isModuleListing).
                     setIsInterruptible(isChannelsInterruptible);
             Receiver receiver = new Receiver(generator, in, _charset, dstArg).
                 setIsSendFilterRules(true).
+                setFilterRuleConfiguration(_filterRuleConfiguration).
                 setIsReceiveStatistics(true).
                 setIsExitEarlyIfEmptyList(true).
                 setIsRecursive(_isRecursiveTransfer).
                 setIsPreservePermissions(_isPreservePermissions).
                 setIsPreserveTimes(_isPreserveTimes).
+                setIsPreserveUser(_isPreserveUser).
+                setIsPreserveGroup(_isPreserveGroup).
+                setIsNumericIds(_isNumericIds).
+                setIsDelete(_isDelete).
+                setIsDeleteExcluded(_isDeleteExcluded).
                 setIsListOnly(_isModuleListing).
                 setIsDeferredWrite(_isDeferredWrite).
                 setIsInterruptible(isChannelsInterruptible).
-                setIsExitAfterEOF(true);
+                setIsExitAfterEOF(true).
+                setIsSafeFileList(cfg.isSafeFileList());
             boolean isOK = RsyncTaskExecutor.exec(executor, generator,
                                                          receiver);
             _statistics = receiver.statistics();

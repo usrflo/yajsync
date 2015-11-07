@@ -25,18 +25,19 @@ import java.net.InetAddress;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
-import java.nio.file.Paths;
 import java.security.Principal;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.Future;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.session.Module;
 import com.github.perlundq.yajsync.session.ModuleException;
 import com.github.perlundq.yajsync.session.ModuleNotFoundException;
@@ -92,8 +93,8 @@ public class Configuration implements Modules
         @Override
         public Collection<Option> options()
         {
-            Option.Handler handler = new Option.Handler() {
-                @Override public void handle(Option option) {
+            Option.ContinuingHandler handler = new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     _cfgFileName = (String) option.getValue();
                 }
             };
@@ -120,7 +121,7 @@ public class Configuration implements Modules
         {
             Map<String, Map<String, String>> modules;
             try (BufferedReader reader = Files.newBufferedReader(
-                                                   Paths.get(fileName),
+                                                   CustomFileSystem.getConfigPath(fileName),
                                                    Charset.defaultCharset())) {
                 modules = parse(reader);
             } catch (IOException e) {
@@ -152,8 +153,8 @@ public class Configuration implements Modules
 
                 try {
                     RestrictedPath vp =
-                        new RestrictedPath(Paths.get(moduleName),
-                                           Paths.get(pathValue));
+                        new RestrictedPath(CustomFileSystem.getPath(moduleName),
+                        		CustomFileSystem.getPath(pathValue));
                     SimpleModule m = new SimpleModule(moduleName, vp);
                     String comment = Text.nullToEmptyStr(moduleContent.get(MODULE_KEY_COMMENT));
                     m._comment = comment;
@@ -284,6 +285,14 @@ public class Configuration implements Modules
         public boolean isWritable() {
             return _isWritable;
         }
+
+		@Override
+		public void postProcessing(boolean isOK) {
+		}
+
+		@Override
+		public void registerFutures(List<Future<Boolean>> futures) {
+		}
     }
 
     private final Map<String, Module> _modules;

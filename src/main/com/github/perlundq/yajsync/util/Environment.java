@@ -22,10 +22,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.UserPrincipal;
 
+import com.github.perlundq.yajsync.filelist.Group;
+import com.github.perlundq.yajsync.filelist.User;
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.text.Text;
 
 public final class Environment
@@ -40,6 +42,7 @@ public final class Environment
     private static final String PROPERTY_SERVER_CONFIG = "rsync.cfg";
     private static final String WINDOWS_NAME = "Windows";
     private static final String PROPERTY_OS_NAME = "os.name";
+    public static final String PROPERTY_RSYNC_PASSWORD = "RSYNC_PASSWORD";	// not present unless manually defined; public for global reference
 
     public static final int UMASK = umask();
     public static final int DEFAULT_DIR_PERMS = 0777 & ~ UMASK;
@@ -48,31 +51,46 @@ public final class Environment
     public static final boolean IS_PATH_SEPARATOR_SLASH = PATH_SEPARATOR.equals(Text.SLASH);
     public static final boolean IS_PATH_SEPARATOR_BACK_SLASH = PATH_SEPARATOR.equals(Text.BACK_SLASH);
     public static final boolean IS_RUNNING_WINDOWS = isRunningWindows();
-
     public static final boolean IS_UNIX_FS = FileSystems.getDefault().supportedFileAttributeViews().contains("unix");
     public static final boolean IS_POSIX_FS = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
     private Environment() {}
 
-    public static String getUserId()
+    public static int getUserId()
     {
-        return getNonNullProperty(PROPERTY_KEY_USER_UID);
+        String uidString = System.getProperty(PROPERTY_KEY_USER_UID);
+        if (uidString == null) {
+            return User.nobody().id();
+        }
+        int uid = Integer.parseInt(uidString);
+        if (uid < 0 || uid > User.ID_MAX) {
+            return User.nobody().id();
+        }
+        return uid;
     }
 
-    public static String getGroupId()
+    public static int getGroupId()
     {
-        return getNonNullProperty(PROPERTY_KEY_GROUP_UID);
+    	String gidString = System.getProperty(PROPERTY_KEY_GROUP_UID);
+        if (gidString == null) {
+            return Group.nobody().id();
+        }
+        int gid = Integer.parseInt(gidString);
+        if (gid < 0 || gid > Group.ID_MAX) {
+            return Group.nobody().id();
+        }
+        return gid;
+
     }
 
-    // native defaults to nobody when authenticating
     public static String getUserName()
     {
-        return getNonNullProperty(PROPERTY_KEY_USER_NAME);
+        return getPropertyOrDefault(PROPERTY_KEY_USER_NAME, User.nobody().name());
     }
 
     public static String getGroupName()
     {
-        return getNonNullProperty(PROPERTY_KEY_GROUP_NAME);
+        return getPropertyOrDefault(PROPERTY_KEY_GROUP_NAME, Group.nobody().name());
     }
 
     public static UserPrincipal getUserPrincipal()
@@ -99,12 +117,22 @@ public final class Environment
 
     public static Path getWorkingDirectory()
     {
-        return Paths.get(getNonNullProperty(PROPERTY_KEY_CWD));
+        return CustomFileSystem.getPath(getNonNullProperty(PROPERTY_KEY_CWD));
     }
 
     public static String getServerConfig(String defName)
     {
         return getPropertyOrDefault(PROPERTY_SERVER_CONFIG, defName);
+    }
+
+    public static char[] getRsyncPassword()
+    {
+        String password = System.getProperty(PROPERTY_RSYNC_PASSWORD);
+        if (password==null)
+        {
+            return null;
+        }
+        return password.toCharArray();
     }
 
     private static String getNonNullProperty(String key)

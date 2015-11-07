@@ -30,8 +30,8 @@ final class Item
     public static final char REPORT_TIMEFAIL    = (1<<2);
     public static final char REPORT_TIME        = (1<<3); // used
     public static final char REPORT_PERMS       = (1<<4); // used
-    public static final char REPORT_OWNER       = (1<<5);
-    public static final char REPORT_GROUP       = (1<<6);
+    public static final char REPORT_OWNER       = (1<<5); // used
+    public static final char REPORT_GROUP       = (1<<6); // used
     public static final char REPORT_ACL         = (1<<7);
     public static final char REPORT_XATTR       = (1<<8);
     public static final char BASIS_TYPE_FOLLOWS = (1<<11);
@@ -41,7 +41,8 @@ final class Item
     public static final char TRANSFER           = (1<<15); // used
 
     private static final char _supported = REPORT_SIZE | REPORT_TIME |
-                                           REPORT_PERMS | IS_NEW |
+                                           REPORT_PERMS | REPORT_OWNER |
+                                           REPORT_GROUP | IS_NEW |
                                            LOCAL_CHANGE | TRANSFER;
 
     public static boolean isValidItem(int flags)

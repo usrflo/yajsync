@@ -23,7 +23,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -33,14 +32,15 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.github.perlundq.yajsync.util.Environment;
+import com.github.perlundq.yajsync.util.SortedList;
 
 public class Filelist
 {
     public static class SegmentBuilder
     {
         private FileInfo _directory;
-        private List<FileInfo> _files = new LinkedList<>();
-        private List<FileInfo> _directories = new LinkedList<>();
+        private SortedList<FileInfo> _files = new SortedList<>();
+        private SortedList<FileInfo> _directories = new SortedList<>();
 
         public SegmentBuilder(FileInfo directory)
         {
@@ -87,10 +87,10 @@ public class Filelist
             return _files.size();
         }
 
-        // O(n)
+        // O(log n) by SortedList
         public boolean contains(FileInfo fileInfo)
         {
-            return _files.contains(fileInfo);
+            return _files.containsElement(fileInfo);
         }
 
         private void clear()
@@ -314,13 +314,13 @@ public class Filelist
         return segment;
     }
 
-    private void extractStubDirectories(List<FileInfo> directories)
+    private void extractStubDirectories(SortedList<FileInfo> directories)
     {
         if (_log.isLoggable(Level.FINER)) {
             _log.finer("extracting all stub directories from " + directories);
         }
 
-        Collections.sort(directories);
+        // Collections.sort(directories);
         for (FileInfo f : directories) {
             assert f.attrs().isDirectory();
             if (!f.isDotDir()) {

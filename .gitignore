@@ -4,3 +4,5 @@
 /misc/
 /build/
 *~
+/bin
+/target/

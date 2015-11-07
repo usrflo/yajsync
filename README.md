@@ -4,16 +4,41 @@ yajsync
 yajsync is a port of [rsync](http://rsync.samba.org) written in Java.
 
 yajsync currently supports a minimal subset of rsync protocol version
-30.0, with the additional constraint that the peer must also support
-rsync safe file lists.
+30.0.
 
 Currently implemented rsync options:
 
 - Incremental recursion (-r, --recursive)
 
+- Preserve owner (-o, --owner)
+
+- Preserve group (-g, --group)
+
+- Don't map uid/gid values by user/group name (--numeric-ids)
+
 - Preserve permissions (-p, --perms)
 
 - Preserve times (-t, --times)
+
+- Transfer directories (-d, --dirs)
+
+- Don't skip files that match size and time (-I, --ignore-times)
+
+- Add a file-filtering RULE (-f, --filter)
+
+- Exclude files matching PATTERN (--exclude)
+
+- Read exclude patterns from FILE (--exclude-from)
+
+- Don't exclude files matching PATTERN (--include)
+
+- Read list of source-file names from FILE (--include-from)
+
+- Delete extraneous files from dest dirs (--delete)
+
+- Delete excluded files from dest dirs (--delete-excluded)
+
+- Read daemon-access password from FILE (--password-file=FILE) or environment variable RSYNC_PASSWORD
 
 - Module file listings
 
@@ -41,7 +66,7 @@ Warning
 
 This software is still unstable and there might be data corruption
 bugs hiding. So use it only carefully at your own risk.
-     
+
 If you encounter any problems please create an issue with
 https://github.com/perlundq/yajsync/issues/new
 
@@ -179,7 +204,7 @@ Recommended extra options to the jvm (i.e. must be placed before the
 Turn on assertions:
 
     -ea
-    
+
 Use a more memory conservative garbage collector:
 
     -XX:+UseConcMarkSweepGC

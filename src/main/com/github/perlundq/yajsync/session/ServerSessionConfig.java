@@ -24,7 +24,6 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
@@ -34,6 +33,7 @@ import java.util.regex.Pattern;
 
 import com.github.perlundq.yajsync.channels.ChannelEOFException;
 import com.github.perlundq.yajsync.channels.ChannelException;
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.security.RsyncAuthContext;
 import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.text.TextConversionException;
@@ -58,8 +58,16 @@ public class ServerSessionConfig extends SessionConfig
     private boolean _isSender = false;
     private boolean _isPreservePermissions = false;
     private boolean _isPreserveTimes = false;
+    private boolean _isPreserveUser = false;
+    private boolean _isPreserveGroup = false;
+    private boolean _isNumericIds = false;
+    private boolean _isDelete = false;
+    private boolean _isDeleteExcluded = false;
+    private boolean _isIgnoreTimes = false;
     private Module _module;
     private int _verbosity = 0;
+    private boolean _isSafeFileList;
+    private boolean _isTransferDirs = false;
 
 
     /**
@@ -200,6 +208,11 @@ public class ServerSessionConfig extends SessionConfig
         _module = module;
     }
 
+    public Module getModule()
+    {
+		return _module;
+    }
+
     /**
      * @throws TextConversionException
      */
@@ -253,58 +266,121 @@ public class ServerSessionConfig extends SessionConfig
         argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "sender", "", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     setIsSender();
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "recursive", "r", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     enableRecursiveTransfer();
                 }}));
 
         argsParser.add(Option.newStringOption(
             Option.Policy.REQUIRED,
             "rsh", "e", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     parsePeerCompatibilites((String) option.getValue());
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "ignore-times", "I", "",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        setIsIgnoreTimes();
+                    }}));
+
+        argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "verbose", "v", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     increaseVerbosity();
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
+            "owner", "o", "",
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
+                    setIsPreserveUser();
+                }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "group", "g", "",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        setIsPreserveGroup();
+                    }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "numeric-ids", "", "",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	setIsNumericIds();
+                    }}));
+
+        argsParser.add(Option.newWithoutArgument(
+            Option.Policy.OPTIONAL,
             "perms", "p", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     setIsPreservePermissions();
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "times", "t", "",
-            new Option.Handler() {
-                @Override public void handle(Option option) {
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
                     setIsPreserveTimes();
                 }}));
 
 
+        argsParser.add(Option.newWithoutArgument(
+            Option.Policy.OPTIONAL,
+            "dirs", "d", "",
+            new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
+                	_isTransferDirs = true;
+                }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "delete", "", "",
+                new Option.ContinuingHandler() {
+                   @Override public void handleAndContinue(Option option) {
+                	   setIsDelete();
+                }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "delete-excluded", "", "",
+                new Option.ContinuingHandler() {
+                   @Override public void handleAndContinue(Option option) {
+                	   setIsDeleteExcluded();
+                	   setIsDelete(); // implicit option
+                }}));
+
         // FIXME: let ModuleProvider mutate this argsParser instance before
         // calling parse (e.g. adding specific options or removing options)
 
-        argsParser.parse(receivedArguments);
+        ArgumentParser.Status rc = argsParser.parse(receivedArguments);
+        assert rc == ArgumentParser.Status.CONTINUE;
         assert !_isRecursiveTransfer || _isIncrementalRecurse :
                "We support only incremental recursive transfers for now";
+
+        if (!(_isTransferDirs || _isRecursiveTransfer) && _isDelete) {
+        	throw new RsyncProtocolException(
+        		"--delete does not work without --recursive (-r) or --dirs (-d).");
+        }
 
         if (!isSender() && !_module.isWritable()) {
             throw new RsyncProtocolException(
@@ -333,7 +409,7 @@ public class ServerSessionConfig extends SessionConfig
                                       fileName));
                 }
                 Path safePath =
-                    _module.restrictedPath().resolve(Paths.get(fileName));
+                    _module.restrictedPath().resolve(CustomFileSystem.getPath(fileName));
                 if (Text.isNameDotDir(fileName)) {
                     safePath = safePath.resolve(PathOps.DOT_DIR);
                 }
@@ -349,7 +425,7 @@ public class ServerSessionConfig extends SessionConfig
                     unnamed, unnamed.size()));
             }
             String fileName = unnamed.get(0);
-            Path safePath = _module.restrictedPath().resolve(Paths.get(fileName));
+            Path safePath = _module.restrictedPath().resolve(CustomFileSystem.getPath(fileName));
             _receiverDestination = safePath.normalize();
 
             if (_log.isLoggable(Level.FINE)) {
@@ -380,13 +456,7 @@ public class ServerSessionConfig extends SessionConfig
             }
             if (str.contains("s")) { // CF_SYMLINK_ICONV
             }
-            if (str.contains("f")) { // CF_SAFE_FLIST
-                // NOP, corresponds to use_safe_inc_flist in native rsync
-            } else {
-                throw new RsyncProtocolException(
-                    String.format("Peer does not support safe file lists: %s",
-                                  str));
-            }
+            _isSafeFileList = str.contains("f");
         } else {
             throw new RsyncProtocolException(
                 String.format("Protocol not supported - got %s from peer",
@@ -396,7 +466,10 @@ public class ServerSessionConfig extends SessionConfig
 
     private void sendCompatibilities() throws ChannelException
     {
-        byte flags = RsyncCompatibilities.CF_SAFE_FLIST;
+        byte flags = 0;
+        if (_isSafeFileList) {
+            flags |= RsyncCompatibilities.CF_SAFE_FLIST;
+        }
         if (_isIncrementalRecurse) {
             flags |= RsyncCompatibilities.CF_INC_RECURSE;
         }
@@ -426,6 +499,36 @@ public class ServerSessionConfig extends SessionConfig
         _isPreserveTimes = true;
     }
 
+    private void setIsPreserveUser()
+    {
+        _isPreserveUser = true;
+    }
+
+    private void setIsPreserveGroup()
+    {
+        _isPreserveGroup = true;
+    }
+
+    private void setIsNumericIds()
+    {
+        _isNumericIds = true;
+    }
+
+    private void setIsDelete()
+    {
+        _isDelete = true;
+    }
+
+    private void setIsDeleteExcluded()
+    {
+        _isDeleteExcluded = true;
+    }
+
+    private void setIsIgnoreTimes()
+    {
+        _isIgnoreTimes = true;
+    }
+
     public boolean isSender()
     {
         return _isSender;
@@ -451,6 +554,39 @@ public class ServerSessionConfig extends SessionConfig
         return _isPreserveTimes;
     }
 
+    public boolean isPreserveUser()
+    {
+        return _isPreserveUser;
+    }
+
+    public boolean isPreserveGroup()
+    {
+        return _isPreserveGroup;
+    }
+
+    public boolean isNumericIds()
+    {
+        return _isNumericIds;
+    }
+
+    public boolean isDelete() {
+    	return _isDelete;
+    }
+
+    public boolean isDeleteExcluded() {
+    	return _isDeleteExcluded;
+    }
+
+    public boolean isIgnoreTimes()
+    {
+        return _isIgnoreTimes;
+    }
+
+    public boolean isSafeFileList()
+    {
+        return _isSafeFileList;
+    }
+
     public Path getReceiverDestination()
     {
         assert _receiverDestination != null;
@@ -465,5 +601,10 @@ public class ServerSessionConfig extends SessionConfig
     private String receiveModule() throws ChannelException
     {
         return readLine();
+    }
+
+    public boolean isTransferDirs()
+    {
+        return _isTransferDirs;
     }
 }

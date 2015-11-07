@@ -26,8 +26,10 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.UserPrincipal;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -41,13 +43,18 @@ public class RsyncFileAttributes
     private final int _mode;
     private final long _size;
     private final long _lastModified;
+    private final User _user;
+    private final Group _group;
 
     /**
      * @throws IllegalArgumentException if fileSize and/or lastModified is
      *         negative
      */
-    public RsyncFileAttributes(int mode, long fileSize, long lastModified)
+    public RsyncFileAttributes(int mode, long fileSize, long lastModified,
+                               User user, Group group)
     {
+        assert user != null;
+        assert group != null;
         if (fileSize < 0) {
             throw new IllegalArgumentException(String.format(
                 "illegal negative file size %d", fileSize));
@@ -59,32 +66,43 @@ public class RsyncFileAttributes
         _mode = mode;
         _size = fileSize;
         _lastModified = lastModified;
+        _user = user;
+        _group = group;
     }
 
     private RsyncFileAttributes(BasicFileAttributes attrs)
     {
         this(RsyncFileAttributes.toMode(attrs),
              attrs.size(),
-             attrs.lastModifiedTime().to(TimeUnit.SECONDS));
+             attrs.lastModifiedTime().to(TimeUnit.SECONDS),
+             User.whoami(),
+             Group.whoami());
     }
 
     private RsyncFileAttributes(PosixFileAttributes attrs)
     {
         this(RsyncFileAttributes.toMode(attrs),
              attrs.size(),
-             attrs.lastModifiedTime().to(TimeUnit.SECONDS));
+             attrs.lastModifiedTime().to(TimeUnit.SECONDS),
+             new User(attrs.owner().getName(), User.whoami().id()),
+             new Group(attrs.group().getName(), Group.whoami().id()));
     }
 
     public static RsyncFileAttributes stat(Path path) throws IOException
     {
         if (Environment.IS_UNIX_FS) {
             Map<String, Object> attrs =
-                Files.readAttributes(path, "unix:lastModifiedTime,mode,size",
+                Files.readAttributes(path, "unix:lastModifiedTime,mode,size,uid,owner,gid,group",
                                      LinkOption.NOFOLLOW_LINKS);
             long mtime = ((FileTime) attrs.get("lastModifiedTime")).to(TimeUnit.SECONDS);
             int mode = (int) attrs.get("mode");
             long size = (long) attrs.get("size");
-            return new RsyncFileAttributes(mode, size, mtime);
+            String user = ((UserPrincipal) attrs.get("owner")).getName();
+            int uid = (int) attrs.get("uid");
+            String group = ((GroupPrincipal) attrs.get("group")).getName();
+            int gid = (int) attrs.get("gid");
+            return new RsyncFileAttributes(mode, size, mtime,
+                                           new User(user, uid), new Group(group, gid));
         } else if (Environment.IS_POSIX_FS) {
             PosixFileAttributes attrs =
                 Files.readAttributes(path, PosixFileAttributes.class,
@@ -119,10 +137,11 @@ public class RsyncFileAttributes
     @Override
     public String toString()
     {
-        return String.format("%s (type=%s, mode=%#o, size=%d, lastModified=%d)",
+        return String.format("%s (type=%s, mode=%#o, size=%d, " +
+                             "lastModified=%d, user=%s, group=%s)",
                              getClass().getSimpleName(),
                              FileOps.fileTypeToString(_mode),
-                             _mode, _size, _lastModified);
+                             _mode, _size, _lastModified, _user, _group);
     }
 
     @Override
@@ -132,7 +151,9 @@ public class RsyncFileAttributes
             RsyncFileAttributes other = (RsyncFileAttributes) obj;
             return _lastModified == other._lastModified &&
                    _size         == other._size &&
-                   _mode         == other._mode;
+                   _mode         == other._mode &&
+                   _user.equals(other._user) &&
+                   _group.equals(other._group);
         }
         return false;
     }
@@ -140,7 +161,7 @@ public class RsyncFileAttributes
     @Override
     public int hashCode()
     {
-        return Objects.hash(_lastModified, _size, _mode);
+        return Objects.hash(_lastModified, _size, _mode, _user, _group);
     }
 
     public int mode()
@@ -156,6 +177,16 @@ public class RsyncFileAttributes
     public long size()
     {
         return _size;
+    }
+
+    public User user()
+    {
+        return _user;
+    }
+
+    public Group group()
+    {
+    	return _group;
     }
 
     public boolean isDirectory()
