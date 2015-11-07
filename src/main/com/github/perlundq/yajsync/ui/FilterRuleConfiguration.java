@@ -100,8 +100,10 @@ public class FilterRuleConfiguration {
 
 				// _mergeRuleList.add(new MergeRule(m, splittedRule[1].trim()));
 
+				String _mergeFilename = splittedRule[1].trim();
+
 				try (BufferedReader br = new BufferedReader(new FileReader(
-						_dirname + "/" + splittedRule[1].trim()))) {
+						_dirname + "/" + _mergeFilename))) {
 					String line = br.readLine();
 					while (line != null) {
 						line = line.trim();
@@ -118,10 +120,15 @@ public class FilterRuleConfiguration {
 						}
 						line = br.readLine();
 					}
+
+					if (m._excludeMergeFilename && _mergeFilename!=null) {
+						_localRuleList.addRule("- " + _mergeFilename);
+					}
+
 				} catch (IOException e) {
 					throw new ArgumentParsingError(String.format(
 							"impossible to parse filter file '%s'",
-							splittedRule[1]));
+							_mergeFilename));
 				}
 
 				return;

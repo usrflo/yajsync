@@ -40,7 +40,7 @@ public class FilterRuleList {
 
 	public boolean exclude(String filename, boolean isDirectory) {
 
-		boolean isExcludedMinOnce = false;
+		boolean isIncludedMinOnce = false;
 
 		for (FilterRule rule : _rules) {
 
@@ -51,14 +51,14 @@ public class FilterRuleList {
 
 			if (matches) {
 				if (rule.isInclusion()) {
-					return false;
+					isIncludedMinOnce = true;
 				} else {
-					isExcludedMinOnce = true;
+					return true;
 				}
 			}
 		}
 
-		return isExcludedMinOnce;
+		return !isIncludedMinOnce;
 	}
 
 	/*

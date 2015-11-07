@@ -83,7 +83,7 @@ public class FileInfo implements Comparable<FileInfo>
                                                _attrs.isDirectory(),
                                                other._pathNameBytes,
                                                other._attrs.isDirectory());
-			assert result != 0 || this.equals(other);
+   			assert result != 0 || this.equals(other);
         		return result;
     		}
          */

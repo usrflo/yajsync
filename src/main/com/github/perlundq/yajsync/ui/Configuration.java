@@ -153,7 +153,7 @@ public class Configuration implements Modules
 
                 try {
                     RestrictedPath vp =
-                        new RestrictedPath(CustomFileSystem.getPath(moduleName),
+                		new RestrictedPath(CustomFileSystem.getPath(moduleName),
                         		CustomFileSystem.getPath(pathValue));
                     SimpleModule m = new SimpleModule(moduleName, vp);
                     String comment = Text.nullToEmptyStr(moduleContent.get(MODULE_KEY_COMMENT));

@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -67,6 +68,7 @@ import com.github.perlundq.yajsync.util.MD5;
 import com.github.perlundq.yajsync.util.PathOps;
 import com.github.perlundq.yajsync.util.Rolling;
 import com.github.perlundq.yajsync.util.RuntimeInterruptException;
+import com.github.perlundq.yajsync.util.StatusResult;
 
 public class Sender implements RsyncTask,MessageHandler
 {
@@ -253,7 +255,7 @@ public class Sender implements RsyncTask,MessageHandler
             if (_isReceiveFilterRules) {
             	// read remote filter rules if server
             	try {
-					filterRuleConfiguration = new FilterRuleConfiguration(receiveFilterRules());
+            		filterRuleConfiguration = new FilterRuleConfiguration(receiveFilterRules());
 				} catch (ArgumentParsingError e) {
 					throw new RsyncProtocolException(e);
 				}
@@ -264,8 +266,11 @@ public class Sender implements RsyncTask,MessageHandler
             }
 
             long t1 = System.currentTimeMillis();
+
+            StatusResult<Set<FileInfo>> expandResult = initialExpand(_sourceFiles, filterRuleConfiguration);
+            boolean isInitialListOK = expandResult.isOK();
             Filelist.SegmentBuilder builder = new Filelist.SegmentBuilder(null);
-            boolean isInitialListOK = initialExpand(builder, _sourceFiles, filterRuleConfiguration);
+            builder.addAll(expandResult.value());
 
             Filelist.Segment initialSegment = fileList.newSegment(builder);
 
@@ -533,7 +538,7 @@ public class Sender implements RsyncTask,MessageHandler
             // TODO: make asynchronous (separate indexer thread)
             boolean isOK = true;
             if (fileList.isExpandable()) {
-                isOK = expandAndSendSegments(fileList, parentFilterRuleConfiguration);
+            	isOK = expandAndSendSegments(fileList, parentFilterRuleConfiguration);
             }
             if (_isRecursive && !fileList.isExpandable() && !sentEOF) {
                 if (_log.isLoggable(Level.FINE)) {
@@ -742,10 +747,11 @@ public class Sender implements RsyncTask,MessageHandler
 
     // NOTE: doesn't do any check of the validity of files or normalization -
     // it's up to the caller to do so, e.g. ServerSessionConfig.parseArguments
-    private boolean initialExpand(Filelist.SegmentBuilder builder,
-                                  Iterable<Path> files, FilterRuleConfiguration parentFilterRuleConfiguration)
+    private StatusResult<Set<FileInfo>> initialExpand(Iterable<Path> files,
+    		FilterRuleConfiguration parentFilterRuleConfiguration)
     {
         boolean isOK = true;
+        Set<FileInfo> fileset = new HashSet<>();
 
         for (Path p : files) {
             try {
@@ -758,29 +764,45 @@ public class Sender implements RsyncTask,MessageHandler
                     _characterEncoder.encode(p.getFileName().toString());       // throws TextConversionException
 
                 FileInfo fileInfo = new FileInfo(p, p.getFileName(), nameBytes, attrs);          // throws IllegalArgumentException but that cannot happen
-                if (builder.contains(fileInfo)) {
-                    if (_log.isLoggable(Level.WARNING)) {
-                        _log.warning("pruning duplicate " + fileInfo);
-                    }
-                    isOK = false;  // should we possibly not treat this as an error? (if so also change print statement to debug)
-                    continue;
-                }
                 if (!_isRecursive && !_isTransferDirs &&
                     fileInfo.attrs().isDirectory())
                 {
                     if (_log.isLoggable(Level.INFO)) {
                         _log.info("skipping directory " + fileInfo);
                     }
-                    continue;
-                }
-                if (_log.isLoggable(Level.FINE)) {
-                    _log.fine(String.format("adding %s to segment", fileInfo));
-                }
-                builder.add(fileInfo);
-                if (fileInfo.isDotDir()) {
-                    boolean isExpandOK = expand(builder, fileInfo, parentFilterRuleConfiguration);
-                    isOK = isOK && isExpandOK;
-                    _nextSegmentIndex++; // we have to add it to be compliant with native, but don't try expanding it again later
+                } else {
+                    boolean isAdded = fileset.add(fileInfo);
+                    if (isAdded) {
+                        if (_log.isLoggable(Level.FINE)) {
+                            _log.fine(String.format("adding %s to segment",
+                                                    fileInfo));
+                        }
+                        if (fileInfo.isDotDir()) {
+                            if (_log.isLoggable(Level.FINE)) {
+                                _log.fine(String.format("expanding dot dir %s",
+                                                        fileInfo));
+                            }
+
+                            StatusResult<List<FileInfo>> expandResult =
+                                    expand(fileInfo, parentFilterRuleConfiguration);
+                            isOK = isOK && expandResult.isOK();
+                            for (FileInfo f2 : expandResult.value()) {
+                                boolean isAdded2 = fileset.add(f2);
+                                if (!isAdded2) {
+                                    if (_log.isLoggable(Level.WARNING)) {
+                                        _log.warning("pruning duplicate " + f2);
+                                    }
+                                    isOK = false;
+                                }
+                            }
+                            _nextSegmentIndex++; // we have to add it to be compliant with native, but don't try expanding it again later
+                        }
+                    } else {
+                        if (_log.isLoggable(Level.WARNING)) {
+                            _log.warning("pruning duplicate " + fileInfo);
+                        }
+                        isOK = false;  // should we possibly not treat this as an error? (if so also change print statement to debug)
+                    }
                 }
             } catch (IOException e) {
                 if (_log.isLoggable(Level.WARNING)) {
@@ -798,15 +820,14 @@ public class Sender implements RsyncTask,MessageHandler
             }
         }
 
-        return isOK;
+        return new StatusResult<Set<FileInfo>>(isOK, fileset);
     }
 
-    private boolean expand(Filelist.SegmentBuilder builder, FileInfo directory, FilterRuleConfiguration parentFilterRuleConfiguration)
+    private StatusResult<List<FileInfo>> expand(FileInfo directory, FilterRuleConfiguration parentFilterRuleConfiguration)
     {
-        // assert _isRecursive;
-        assert builder != null;
         assert directory != null;
 
+        List<FileInfo> fileset = new ArrayList<>();
         boolean isOK = true;
         final Path splittedPath[] = splitLocalPathOf(directory);                       // throws RuntimeException if unable to get local path prefix of directory, but that should never happen
 
@@ -820,11 +841,12 @@ public class Sender implements RsyncTask,MessageHandler
                                            "at %s: %s",
                                            directory.path(), e.getMessage()));
             }
-            return false;
+            isOK = false;
+            return new StatusResult<List<FileInfo>>(isOK, fileset);
 		}
-        boolean filterByRules = localFilterRuleConfiguration.isFilterAvailable();
+		boolean filterByRules = localFilterRuleConfiguration.isFilterAvailable();
 
-        // the JVM adds a lot of overhead when doing mostly directory traversals
+		// the JVM adds a lot of overhead when doing mostly directory traversals
         // and reading of file attributes
         try (DirectoryStream<Path> stream =
                 Files.newDirectoryStream(directory.path())) {
@@ -859,15 +881,15 @@ public class Sender implements RsyncTask,MessageHandler
                 byte[] pathNameBytes =
                     _characterEncoder.encodeOrNull(relativePathName);
                 if (pathNameBytes != null) {
-                    FileInfo fi = new FileInfo(entry, relativePath,
-                                               pathNameBytes, attrs);    // throws IllegalArgumentException but that cannot happen
+                    FileInfo f = new FileInfo(entry, relativePath,
+                                              pathNameBytes, attrs);    // throws IllegalArgumentException but that cannot happen
 
                     // use filter
                     if (filterByRules && localFilterRuleConfiguration.exclude(relativePathName, attrs.isDirectory())) {
                 		continue;
                     }
 
-                    builder.add(fi);
+                    fileset.add(f);
                 } else {
                     if (_log.isLoggable(Level.WARNING)) {
                         _log.warning(String.format(
@@ -885,7 +907,7 @@ public class Sender implements RsyncTask,MessageHandler
             }
             isOK = false;
         }
-        return isOK;
+        return new StatusResult<List<FileInfo>>(isOK, fileset);
     }
 
     // TODO: FEATURE: (if possible in native) implement suspend/resume such that
@@ -921,13 +943,15 @@ public class Sender implements RsyncTask,MessageHandler
                 continue;
             }
 
-            Filelist.SegmentBuilder builder =
-                new Filelist.SegmentBuilder(directory);
-            boolean isExpandOK = expand(builder, directory, parentFilterRuleConfiguration);
+            StatusResult<List<FileInfo>> expandResult = expand(directory, parentFilterRuleConfiguration);
+            boolean isExpandOK = expandResult.isOK();
             if (!isExpandOK && _log.isLoggable(Level.WARNING)) {
                 _log.warning("initial file list expansion returned an error");
             }
 
+            Filelist.SegmentBuilder builder =
+                new Filelist.SegmentBuilder(directory);
+            builder.addAll(expandResult.value());
             Filelist.Segment segment = fileList.newSegment(builder);
 
             if (_log.isLoggable(Level.FINE)) {

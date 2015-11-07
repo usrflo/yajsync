@@ -71,10 +71,11 @@ public class FilterRuleConfigurationTest {
 		FilterRuleConfiguration cfg = new FilterRuleConfiguration(null,
 				rootDirectory);
 		cfg.readRule("+ test");
+		cfg.readRule("+ *");
 		cfg.readRule("dir-merge " + mergeFile);
 
 		assertEquals(true,
-				cfg.include("test", false) && !cfg.include(mergeFile, false));
+				cfg.include("test", false) && cfg.include(mergeFile, false));
 	}
 
 	@Test
@@ -113,7 +114,7 @@ public class FilterRuleConfigurationTest {
 		FilterRuleConfiguration cfg = new FilterRuleConfiguration(null,
 				rootDirectory);
 		cfg.readRule("+ test");
-		cfg.readRule("merge,n " + mergeFile);
+		cfg.readRule("dir-merge,n " + mergeFile);
 
 		FilterRuleConfiguration subCfg = new FilterRuleConfiguration(cfg,
 				rootDirectory);
@@ -135,7 +136,7 @@ public class FilterRuleConfigurationTest {
 		FilterRuleConfiguration cfg = new FilterRuleConfiguration(null,
 				rootDirectory);
 		cfg.readRule("+ test");
-		cfg.readRule("merge " + mergeFile);
+		cfg.readRule("dir-merge " + mergeFile);
 
 		FilterRuleConfiguration subCfg = new FilterRuleConfiguration(cfg,
 				rootDirectory);
@@ -162,6 +163,8 @@ public class FilterRuleConfigurationTest {
 		FilterRuleConfiguration subCfg = new FilterRuleConfiguration(cfg,
 				rootDirectory);
 		subCfg.readRule("+ test");
+
+		boolean result = !cfg.include("def", false);
 
 		assertEquals(
 				true,

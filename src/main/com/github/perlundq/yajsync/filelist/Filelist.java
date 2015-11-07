@@ -82,6 +82,13 @@ public class Filelist
             }
         }
 
+        public void addAll(Iterable<FileInfo> fileset)
+        {
+            for (FileInfo f : fileset) {
+                add(f);
+            }
+        }
+
         public int size()
         {
             return _files.size();
