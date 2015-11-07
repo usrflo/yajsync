@@ -366,6 +366,7 @@ public class ServerSessionConfig extends SessionConfig
                 new Option.ContinuingHandler() {
                    @Override public void handleAndContinue(Option option) {
                 	   setIsDeleteExcluded();
+                	   setIsDelete(); // implicit option
                 }}));
 
         // FIXME: let ModuleProvider mutate this argsParser instance before
@@ -375,6 +376,11 @@ public class ServerSessionConfig extends SessionConfig
         assert rc == ArgumentParser.Status.CONTINUE;
         assert !_isRecursiveTransfer || _isIncrementalRecurse :
                "We support only incremental recursive transfers for now";
+
+        if (!(_isTransferDirs || _isRecursiveTransfer) && _isDelete) {
+        	throw new RsyncProtocolException(
+        		"--delete does not work without --recursive (-r) or --dirs (-d).");
+        }
 
         if (!isSender() && !_module.isWritable()) {
             throw new RsyncProtocolException(

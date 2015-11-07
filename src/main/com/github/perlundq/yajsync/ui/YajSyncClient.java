@@ -466,6 +466,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                 new Option.ContinuingHandler() {
                     @Override public void handleAndContinue(Option option) {
                         _isDeleteExcluded = true;
+                        _isDelete = true; // implicit option
                     }}));
 
         options.add(
@@ -711,6 +712,11 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             }
 
             _filterRuleConfiguration = new FilterRuleConfiguration(_inputFilterRules);
+
+            if (!(_isTransferDirs || _isRecursiveTransfer) && _isDelete) {
+            	throw new ArgumentParsingError(
+            		"--delete does not work without --recursive (-r) or --dirs (-d).");
+            }
 
         } catch (ArgumentParsingError e) {
             _err.println(e.getMessage());

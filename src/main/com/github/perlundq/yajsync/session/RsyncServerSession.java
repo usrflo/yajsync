@@ -71,6 +71,8 @@ public class RsyncServerSession
                 setIsPreserveUser(cfg.isPreserveUser()).
                 setIsPreserveGroup(cfg.isPreserveGroup()).
                 setIsNumericIds(cfg.isNumericIds()).
+                setIsDelete(cfg.isDelete()).
+                setIsDeleteExcluded(cfg.isDeleteExcluded()).
                 setIsInterruptible(isChannelsInterruptible).
                 setIsSafeFileList(cfg.isSafeFileList()).
                 setIsTransferDirs(cfg.isTransferDirs());

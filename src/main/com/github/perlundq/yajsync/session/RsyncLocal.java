@@ -157,6 +157,8 @@ public class RsyncLocal
             setIsPreserveUser(_isPreserveUser).
             setIsPreserveGroup(_isPreserveGroup).
             setIsNumericIds(_isNumericIds).
+            setIsDelete(_isDelete).
+            setIsDeleteExcluded(_isDeleteExcluded).
             setIsExitEarlyIfEmptyList(true).
             setIsRecursive(_isRecursiveTransfer).
             setFilterRuleConfiguration(_filterRuleConfiguration).

@@ -93,6 +93,8 @@ public class Sender implements RsyncTask,MessageHandler
     private boolean _isPreserveGroup;
     private boolean _isNumericIds;
     private boolean _isSafeFileList = true;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
     private FilterRuleConfiguration _filterRuleConfiguration;
     private int _nextSegmentIndex;
     private final Statistics _stats = new Statistics();
@@ -169,7 +171,17 @@ public class Sender implements RsyncTask,MessageHandler
         return this;
     }
 
-    public Sender setFilterRuleConfiguration(FilterRuleConfiguration filterRuleConfiguration) {
+    public Sender setIsDelete(boolean _isDelete) {
+		this._isDelete = _isDelete;
+		return this;
+	}
+
+	public Sender setIsDeleteExcluded(boolean _isDeleteExcluded) {
+		this._isDeleteExcluded = _isDeleteExcluded;
+		return this;
+	}
+
+	public Sender setFilterRuleConfiguration(FilterRuleConfiguration filterRuleConfiguration) {
     	_filterRuleConfiguration = filterRuleConfiguration;
     	return this;
     }
@@ -481,6 +493,8 @@ public class Sender implements RsyncTask,MessageHandler
 
     private void sendFilterRules() throws InterruptedException, ChannelException
     {
+    	if (!receiverWantsFilterList()) return;
+
     	if (_filterRuleConfiguration.getFilterRuleList()._rules.size()>0) {
 
     		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleList()._rules) {
@@ -499,6 +513,12 @@ public class Sender implements RsyncTask,MessageHandler
         buf.putInt(0);
         buf.flip();
         _duplexChannel.put(buf);
+    }
+
+    private boolean receiverWantsFilterList()
+    {
+    	// TODO: add parameter -m, --prune-empty-dirs
+    	return (/* _isPruneEmptyDirs || */ _isDelete);
     }
 
     private int sendFiles(Filelist fileList, Filelist.Segment firstSegment, FilterRuleConfiguration parentFilterRuleConfiguration)

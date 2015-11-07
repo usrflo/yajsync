@@ -673,6 +673,10 @@ public class Receiver implements RsyncTask,MessageHandler
     	int numBytesToRead;
     	List<String> list = new ArrayList<>();
 
+    	if (!receiverWantsFilterList()) {
+    		return list;
+    	}
+
     	try {
 
     		while ((numBytesToRead = _senderInChannel.getInt())>0 ) {
@@ -685,6 +689,12 @@ public class Receiver implements RsyncTask,MessageHandler
     	} catch (TextConversionException e) {
     		throw new RsyncProtocolException(e);
         }
+    }
+
+    private boolean receiverWantsFilterList()
+    {
+    	// TODO: add parameter -m, --prune-empty-dirs
+    	return (/* _isPruneEmptyDirs || */ _isDelete);
     }
 
     public Statistics statistics()
