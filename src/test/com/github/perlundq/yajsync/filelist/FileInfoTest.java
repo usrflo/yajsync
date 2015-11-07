@@ -13,9 +13,9 @@ import com.github.perlundq.yajsync.util.FileOps;
 public class FileInfoTest {
 
     RsyncFileAttributes _fileAttrs =
-        new RsyncFileAttributes(FileOps.S_IFREG | 0644, 0, 0, User.whoami());
+        new RsyncFileAttributes(FileOps.S_IFREG | 0644, 0, 0, User.whoami(), Group.whoami());
     RsyncFileAttributes _dirAttrs =
-        new RsyncFileAttributes(FileOps.S_IFDIR | 0755, 0, 0, User.whoami());
+        new RsyncFileAttributes(FileOps.S_IFDIR | 0755, 0, 0, User.whoami(), Group.whoami());
     Path _dotDirPath = Paths.get("./");
     Path dotDirAbsPath = Paths.get("/path/to/module/root/");
     FileInfo _dotDir = new FileInfo(dotDirAbsPath,
@@ -37,7 +37,7 @@ public class FileInfoTest {
         FileInfo f = new FileInfo(_dotDirPath.resolve(p), p,
                                   p.toString().getBytes(), _fileAttrs);
         assertFalse(_dotDir.equals(f));
-        assertTrue(_dotDir.compareTo(f) == -1);
+        assertTrue(_dotDir.compareTo(f) < 0);
     }
 
     @Test
@@ -47,7 +47,7 @@ public class FileInfoTest {
         FileInfo f = new FileInfo(_dotDirPath.resolve(p), p,
                                   p.toString().getBytes(), _fileAttrs);
         assertFalse(_dotDir.equals(f));
-        assertTrue(_dotDir.compareTo(f) == -1);
+        assertTrue(_dotDir.compareTo(f) < 0);
     }
 
     @Test
@@ -57,7 +57,7 @@ public class FileInfoTest {
         FileInfo f = new FileInfo(_dotDirPath.resolve(p), p,
                                   p.toString().getBytes(), _dirAttrs);
         assertFalse(_dotDir.equals(f));
-        assertTrue(_dotDir.compareTo(f) == -1);
+        assertTrue(_dotDir.compareTo(f) < 0);
     }
 
     // test empty throws illegalargumentexception
@@ -91,6 +91,6 @@ public class FileInfoTest {
         FileInfo f = new FileInfo(_dotDirPath.resolve(p), p,
                                   "a./".getBytes(), _dirAttrs);
         assertFalse(_dotDir.equals(f));
-        assertTrue(_dotDir.compareTo(f) == -1);
+        assertTrue(_dotDir.compareTo(f) < 0);
     }
 }

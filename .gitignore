@@ -3,4 +3,6 @@
 /.settings/
 /misc/
 /build/
+/bin/
+/target/
 *~

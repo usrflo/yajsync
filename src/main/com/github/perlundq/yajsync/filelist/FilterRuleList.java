@@ -35,6 +35,12 @@ public class FilterRuleList {
 	}
 
 	public boolean include(String filename, boolean isDirectory) {
+		return !exclude(filename, isDirectory);
+	}
+
+	public boolean exclude(String filename, boolean isDirectory) {
+
+		boolean isIncludedMinOnce = false;
 
 		for (FilterRule rule : _rules) {
 
@@ -44,31 +50,35 @@ public class FilterRuleList {
 			boolean matches = rule.matches(filename);
 
 			if (matches) {
-				return rule.isInclusion();
+				if (rule.isInclusion()) {
+					isIncludedMinOnce = true;
+				} else {
+					return true;
+				}
 			}
 		}
 
-		return false;
+		return !isIncludedMinOnce;
 	}
 
 	/*
 	 * see http://rsync.samba.org/ftp/rsync/rsync.html --> FILTER RULES
 	 */
-	private class FilterRule {
+	public class FilterRule {
 
-		private boolean _inclusion;
-		private boolean _directoryOnly;
-		private boolean _absoluteMatching;
-		private boolean _negateMatching;
-		private boolean _patternMatching;
+		private final boolean _inclusion;
+		private final boolean _directoryOnly;
+		private final boolean _absoluteMatching;
+		private final boolean _negateMatching;
+		private final boolean _patternMatching;
 		private String _path;
 		private Pattern _pattern;
 
 		/*
 		 * @formatter:off
-		 * 
+		 *
 		 * Input samples: + /some/path/this-file-is-found + *.csv - * + !/.svn/
-		 * 
+		 *
 		 * @formatter:on
 		 */
 
@@ -101,6 +111,11 @@ public class FilterRuleList {
 
 			_absoluteMatching = _path.startsWith("/");
 
+			// add . for absolute matching to conform to rsync paths
+			if (_absoluteMatching) {
+				_path = "."+_path;
+			}
+
 			// check if string or pattern matching is required
 			// _patternMatching = _path.contains("*") || _path.contains("?") ||
 			// _path.contains("[");
@@ -124,7 +139,7 @@ public class FilterRuleList {
 							&& _path.charAt(i + 1) == '*') {
 						b.append(".*");
 					} else if (c == '*') {
-						b.append("[^/]*");
+						b.append("[^/].*");
 					} else {
 						b.append(c);
 					}
@@ -141,11 +156,30 @@ public class FilterRuleList {
 			if (_patternMatching) {
 				_result = _pattern.matcher(filename).matches();
 			} else {
+
+				String path = _path + (_directoryOnly ? "/":"");
+
 				// string matching
 				if (_absoluteMatching) {
-					_result = filename.startsWith(_path);
+					if (filename.length()<path.length()) {
+						// no matching if filename is shorter than _path
+						_result = false;
+					} else if (filename.length()==path.length()) {
+						// matching if filename equals _path
+						_result = filename.startsWith(path);
+					} else if (filename.charAt(path.length())=='/') {
+						// matching if filename is contained in _path
+						_result = filename.startsWith(path);
+					} else {
+						_result = false;
+					}
 				} else {
-					_result = filename.contains(_path);
+					// tail matching
+					if (path.length()<filename.length()) {
+						_result = filename.endsWith("/"+path);
+					} else {
+						_result = filename.equals(path);
+					}
 				}
 			}
 
@@ -160,20 +194,31 @@ public class FilterRuleList {
 			return _directoryOnly;
 		}
 
+		@Override
 		public String toString() {
 			StringBuilder buf = new StringBuilder();
 			buf.append(_inclusion ? "+" : "-").append(" ");
 			buf.append(_negateMatching ? "!" : "");
-			if (_patternMatching) {
+			/* if (_patternMatching) {
 				buf.append(_pattern.toString());
-			} else {
+			} else { */
 				buf.append(_path);
-			}
+			// }
 			if (_directoryOnly) {
-				buf.append(" (directory only)");
+				buf.append("/");
 			}
 
 			return buf.toString();
 		}
+	}
+
+	@Override
+	public String toString() {
+
+		StringBuilder buf = new StringBuilder();
+		for (FilterRule rule : _rules) {
+			buf.append(rule).append("; ");
+		}
+		return buf.toString();
 	}
 }

@@ -2,6 +2,7 @@ package com.github.perlundq.yajsync.test;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
@@ -20,6 +21,7 @@ import java.security.Principal;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -27,6 +29,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.After;
 import org.junit.Before;
@@ -34,7 +37,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import com.github.perlundq.yajsync.filelist.Group;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
+import com.github.perlundq.yajsync.filelist.User;
 import com.github.perlundq.yajsync.security.RsyncAuthContext;
 import com.github.perlundq.yajsync.session.Module;
 import com.github.perlundq.yajsync.session.ModuleException;
@@ -109,6 +114,12 @@ class FileUtil
         return leftType == rightType && (!FileOps.isRegularFile(leftType) ||
                                          leftAttrs.size() == rightAttrs.size());
     }
+
+    public static boolean isFileSameOwnerAndGroup(RsyncFileAttributes leftAttrs,
+            RsyncFileAttributes rightAttrs)
+	{
+    	return leftAttrs.user().equals(rightAttrs.user()) && leftAttrs.group().equals(rightAttrs.group());
+	}
 
     private static SortedMap<Path, Path> listDir(Path path) throws IOException
     {
@@ -223,6 +234,16 @@ class SimpleRestrictedModule extends RestrictedModule
     {
         return _comment;
     }
+
+	@Override
+	public void postProcessing(boolean isOK)
+	{
+	}
+
+	@Override
+	public void registerFutures(List<Future<Boolean>> futures)
+	{
+	}
 }
 
 class SimpleModule implements Module
@@ -272,6 +293,14 @@ class SimpleModule implements Module
     {
         return _isWritable;
     }
+
+	@Override
+	public void postProcessing(boolean isOK) {
+	}
+
+	@Override
+	public void registerFutures(List<Future<Boolean>> futures) {
+	}
 }
 
 class TestModules implements Modules
@@ -575,6 +604,116 @@ public class SystemTest
     }
 
     @Test
+    public void testClientDirCopyDstDeletion() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 2;
+        long fileSize = FileUtil.du(srcFile1, srcFile2);
+
+        Files.createDirectory(dst);
+        Path dstDir1 = dst.resolve("dir.remove");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1.remove");
+        FileUtil.writeToFiles(10, dstFile1);
+        Path dstFile2 = dst.resolve("file2.remove");
+        FileUtil.writeToFiles(9, dstFile2);
+
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+
+    @Test
+    public void testClientDirCopyExcluded() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile1);
+
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--exclude=file2");
+
+        Files.deleteIfExists(srcFile2);
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientDirCopyDstDeleteExcluded() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile2);
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir1 = copyOfSrc.resolve("dir");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1");
+        FileUtil.writeToFiles(9, dstFile1);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete-excluded", "--exclude=file1");
+
+        Files.deleteIfExists(srcFile1);
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
     public void testCopyFileMultipleBlockSize() throws IOException
     {
         Path src = _tempDir.newFile().toPath();
@@ -703,6 +842,72 @@ public class SystemTest
         assertTrue(status2.stats.numTransferredFiles() == 0);
         assertTrue(status2.stats.totalLiteralSize() == 0);
         assertTrue(status2.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientCopyPreserveOwnerAndGroup() throws IOException
+    {
+    	if (!User.root().name().equals(User.whoami().name())) {
+    		fail("owner/group test has to be run as root");
+    	}
+
+    	Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir = src.resolve("dir");
+        Path srcFile = srcDir.resolve("file");
+        Files.createDirectory(srcDir);
+        FileUtil.writeToFiles(1, srcFile);
+        FileOps.setOwner(srcFile, User.nobody());
+        FileOps.setGroup(srcFile, Group.nobody());
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir = copyOfSrc.resolve("dir");
+        Path dstFile = dstDir.resolve("file");
+        Files.createDirectory(dstDir);
+        FileUtil.writeToFiles(1, dstFile);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--owner", "--group");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(FileUtil.isFileSameOwnerAndGroup(RsyncFileAttributes.stat(srcFile), RsyncFileAttributes.stat(dstFile)));
+    }
+
+    @Test
+    public void testClientCopyPreserveUidAndGid() throws IOException
+    {
+    	if (!User.root().name().equals(User.whoami().name())) {
+    		fail("owner/group test has to be run as root");
+    	}
+
+    	Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir = src.resolve("dir");
+        Path srcFile = srcDir.resolve("file");
+        Files.createDirectory(srcDir);
+        FileUtil.writeToFiles(1, srcFile);
+        FileOps.setUserId(srcFile, User.nobody().id());
+        FileOps.setGroupId(srcFile, Group.nobody().id());
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir = copyOfSrc.resolve("dir");
+        Path dstFile = dstDir.resolve("file");
+        Files.createDirectory(dstDir);
+        FileUtil.writeToFiles(1, dstFile);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--owner", "--group", "--numeric-ids");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(FileUtil.isFileSameOwnerAndGroup(RsyncFileAttributes.stat(srcFile), RsyncFileAttributes.stat(dstFile)));
     }
 
     @Test(timeout=100)

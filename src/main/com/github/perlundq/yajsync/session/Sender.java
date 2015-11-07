@@ -29,7 +29,6 @@ import java.nio.charset.Charset;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,8 +49,11 @@ import com.github.perlundq.yajsync.channels.RsyncInChannel;
 import com.github.perlundq.yajsync.channels.RsyncOutChannel;
 import com.github.perlundq.yajsync.filelist.FileInfo;
 import com.github.perlundq.yajsync.filelist.Filelist;
+import com.github.perlundq.yajsync.filelist.FilterRuleList;
+import com.github.perlundq.yajsync.filelist.Group;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
 import com.github.perlundq.yajsync.filelist.User;
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.io.FileView;
 import com.github.perlundq.yajsync.io.FileViewNotFound;
 import com.github.perlundq.yajsync.io.FileViewOpenFailed;
@@ -60,6 +62,8 @@ import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.text.TextConversionException;
 import com.github.perlundq.yajsync.text.TextDecoder;
 import com.github.perlundq.yajsync.text.TextEncoder;
+import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
+import com.github.perlundq.yajsync.util.ArgumentParsingError;
 import com.github.perlundq.yajsync.util.MD5;
 import com.github.perlundq.yajsync.util.PathOps;
 import com.github.perlundq.yajsync.util.Rolling;
@@ -82,14 +86,20 @@ public class Sender implements RsyncTask,MessageHandler
     private final TextDecoder _characterDecoder;
     private final TextEncoder _characterEncoder;
     private final Set<User> _transferredUserNames = new LinkedHashSet<>();
+    private final Set<Group> _transferredGroupNames = new LinkedHashSet<>();
     private boolean _isReceiveFilterRules;
     private boolean _isSendStatistics;
     private boolean _isExitEarlyIfEmptyList;
     private boolean _isRecursive;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
     private boolean _isSafeFileList = true;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private int _nextSegmentIndex;
-    private Statistics _stats = new Statistics();
+    private final Statistics _stats = new Statistics();
     private boolean _isInterruptible = true;
     private boolean _isExitAfterEOF = false;
     private boolean _isTransferDirs = false;
@@ -151,6 +161,33 @@ public class Sender implements RsyncTask,MessageHandler
         return this;
     }
 
+    public Sender setIsPreserveGroup(boolean isPreserveGroup)
+    {
+        _isPreserveGroup = isPreserveGroup;
+        return this;
+    }
+
+    public Sender setIsNumericIds(boolean isNumericIds)
+    {
+        _isNumericIds = isNumericIds;
+        return this;
+    }
+
+    public Sender setIsDelete(boolean _isDelete) {
+		this._isDelete = _isDelete;
+		return this;
+	}
+
+	public Sender setIsDeleteExcluded(boolean _isDeleteExcluded) {
+		this._isDeleteExcluded = _isDeleteExcluded;
+		return this;
+	}
+
+	public Sender setFilterRuleConfiguration(FilterRuleConfiguration filterRuleConfiguration) {
+    	_filterRuleConfiguration = filterRuleConfiguration;
+    	return this;
+    }
+
     public Sender setIsExitAfterEOF(boolean isExitAfterEOF)
     {
         _isExitAfterEOF = isExitAfterEOF;
@@ -210,23 +247,27 @@ public class Sender implements RsyncTask,MessageHandler
     public Boolean call() throws ChannelException, InterruptedException
     {
         Filelist fileList = new Filelist(_isRecursive);
+        FilterRuleConfiguration filterRuleConfiguration;
         try {
             if (_log.isLoggable(Level.FINE)) {
                 _log.fine("Sender.transfer:");
             }
             if (_isReceiveFilterRules) {
-                String rules = receiveFilterRules();
-                if (rules.length() > 0) {
-                    throw new RsyncProtocolException(
-                        String.format("Received a list of filter rules of length " +
-                            "%d from peer, this is not yet supported " +
-                            "(%s)", rules.length(), rules));
-                }
+            	// read remote filter rules if server
+            	try {
+            		filterRuleConfiguration = new FilterRuleConfiguration(receiveFilterRules());
+				} catch (ArgumentParsingError e) {
+					throw new RsyncProtocolException(e);
+				}
+            } else {
+            	// read local filter rules if client
+            	filterRuleConfiguration = _filterRuleConfiguration;
+            	sendFilterRules();
             }
 
             long t1 = System.currentTimeMillis();
 
-            StatusResult<Set<FileInfo>> expandResult = initialExpand(_sourceFiles);
+            StatusResult<Set<FileInfo>> expandResult = initialExpand(_sourceFiles, filterRuleConfiguration);
             boolean isInitialListOK = expandResult.isOK();
             Filelist.SegmentBuilder builder = new Filelist.SegmentBuilder(null);
             builder.addAll(expandResult.value());
@@ -252,6 +293,10 @@ public class Sender implements RsyncTask,MessageHandler
                 sendUserList();
             }
 
+            if (_isPreserveGroup && !_isRecursive) {
+            	sendGroupList();
+            }
+
             _stats.setFileListBuildTime(Math.max(1, t2 - t1));
             _stats.setFileListTransferTime(Math.max(0, t3 - t2));
             long segmentSize = _duplexChannel.numBytesWritten() - numBytesWritten;
@@ -272,7 +317,7 @@ public class Sender implements RsyncTask,MessageHandler
                 return isInitialListOK;
             }
 
-            int ioError = sendFiles(fileList, initialSegment);
+            int ioError = sendFiles(fileList, initialSegment, filterRuleConfiguration);
             if (ioError != 0) {
                 sendIntMessage(MessageCode.IO_ERROR, ioError);
             }
@@ -315,6 +360,14 @@ public class Sender implements RsyncTask,MessageHandler
         sendEncodedInt(uid);
     }
 
+    private void sendGroupId(int gid) throws ChannelException
+    {
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("sending group id " + gid);
+        }
+        sendEncodedInt(gid);
+    }
+
     private void sendUserName(String name) throws ChannelException
     {
         if (_log.isLoggable(Level.FINER)) {
@@ -330,12 +383,37 @@ public class Sender implements RsyncTask,MessageHandler
         _duplexChannel.put(buf);
     }
 
+    private void sendGroupName(String name) throws ChannelException
+    {
+        if (_log.isLoggable(Level.FINER)) {
+            _log.finer("sending group name " + name);
+        }
+        ByteBuffer buf = ByteBuffer.wrap(_characterEncoder.encode(name));
+        if (buf.remaining() > 0xFF) { // unlikely scenario, we could also recover from this (by truncating or falling back to nobody)
+            throw new IllegalStateException(String.format(
+                "encoded length of group name %s is %d, which is larger than " +
+                "what fits in a byte (255)", name, buf.remaining()));
+        }
+        _duplexChannel.putByte((byte) buf.remaining());
+        _duplexChannel.put(buf);
+    }
+
     private void sendUserList() throws ChannelException
     {
         for (User user : _transferredUserNames) {
-            assert user.uid() != User.root().uid();
-            sendUserId(user.uid());
+            assert user.id() != User.root().id();
+            sendUserId(user.id());
             sendUserName(user.name());
+        }
+        sendEncodedInt(0);
+    }
+
+    private void sendGroupList() throws ChannelException
+    {
+        for (Group group : _transferredGroupNames) {
+            assert group.id() != Group.root().id();
+            sendGroupId(group.id());
+            sendGroupName(group.name());
         }
         sendEncodedInt(0);
     }
@@ -399,19 +477,56 @@ public class Sender implements RsyncTask,MessageHandler
     /**
      * @throws RsyncProtocolException if failing to decode the filter rules
      */
-    private String receiveFilterRules() throws ChannelException
+    private List<String> receiveFilterRules() throws ChannelException
     {
-        try {
-            int numBytesToRead = _duplexChannel.getInt();
-            ByteBuffer buf = _duplexChannel.get(numBytesToRead);
-            String filterRules = _characterDecoder.decode(buf);
-            return filterRules;
-        } catch (TextConversionException e) {
-            throw new RsyncProtocolException(e);
+    	int numBytesToRead;
+    	List<String> list = new ArrayList<>();
+
+    	try {
+
+    		while ((numBytesToRead = _duplexChannel.getInt())>0 ) {
+                ByteBuffer buf = _duplexChannel.get(numBytesToRead);
+                list.add(_characterDecoder.decode(buf));
+    		}
+
+    		return list;
+
+    	} catch (TextConversionException e) {
+    		throw new RsyncProtocolException(e);
         }
     }
 
-    private int sendFiles(Filelist fileList, Filelist.Segment firstSegment)
+    private void sendFilterRules() throws InterruptedException, ChannelException
+    {
+    	if (!receiverWantsFilterList()) return;
+
+    	if (_filterRuleConfiguration.getFilterRuleList()._rules.size()>0) {
+
+    		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleList()._rules) {
+    			byte[] encodedRule = _characterEncoder.encode(rule.toString());
+
+    			ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
+    			buf.putInt(encodedRule.length);
+    			buf.put(encodedRule);
+    			buf.flip();
+    			_duplexChannel.put(buf);
+    		}
+    	}
+
+    	// send stop signal
+    	ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+        buf.putInt(0);
+        buf.flip();
+        _duplexChannel.put(buf);
+    }
+
+    private boolean receiverWantsFilterList()
+    {
+    	// TODO: add parameter -m, --prune-empty-dirs
+    	return (/* _isPruneEmptyDirs || */ _isDelete);
+    }
+
+    private int sendFiles(Filelist fileList, Filelist.Segment firstSegment, FilterRuleConfiguration parentFilterRuleConfiguration)
         throws ChannelException
     {
         boolean sentEOF = false;
@@ -423,7 +538,7 @@ public class Sender implements RsyncTask,MessageHandler
             // TODO: make asynchronous (separate indexer thread)
             boolean isOK = true;
             if (fileList.isExpandable()) {
-                isOK = expandAndSendSegments(fileList);
+            	isOK = expandAndSendSegments(fileList, parentFilterRuleConfiguration);
             }
             if (_isRecursive && !fileList.isExpandable() && !sentEOF) {
                 if (_log.isLoggable(Level.FINE)) {
@@ -482,7 +597,7 @@ public class Sender implements RsyncTask,MessageHandler
                 if (!Item.isValidItem(iFlags)) {
                     throw new IllegalStateException(String.format(
                         "got flags %s - not supported",
-                        Integer.toBinaryString((int) iFlags)));
+                        Integer.toBinaryString(iFlags)));
                 }
                 if ((iFlags & Item.TRANSFER) == 0) {
                     if (segment == null ||
@@ -632,7 +747,8 @@ public class Sender implements RsyncTask,MessageHandler
 
     // NOTE: doesn't do any check of the validity of files or normalization -
     // it's up to the caller to do so, e.g. ServerSessionConfig.parseArguments
-    private StatusResult<Set<FileInfo>> initialExpand(Iterable<Path> files)
+    private StatusResult<Set<FileInfo>> initialExpand(Iterable<Path> files,
+    		FilterRuleConfiguration parentFilterRuleConfiguration)
     {
         boolean isOK = true;
         Set<FileInfo> fileset = new HashSet<>();
@@ -668,7 +784,7 @@ public class Sender implements RsyncTask,MessageHandler
                             }
 
                             StatusResult<List<FileInfo>> expandResult =
-                                    expand(fileInfo);
+                                    expand(fileInfo, parentFilterRuleConfiguration);
                             isOK = isOK && expandResult.isOK();
                             for (FileInfo f2 : expandResult.value()) {
                                 boolean isAdded2 = fileset.add(f2);
@@ -707,13 +823,28 @@ public class Sender implements RsyncTask,MessageHandler
         return new StatusResult<Set<FileInfo>>(isOK, fileset);
     }
 
-    private StatusResult<List<FileInfo>> expand(FileInfo directory)
+    private StatusResult<List<FileInfo>> expand(FileInfo directory, FilterRuleConfiguration parentFilterRuleConfiguration)
     {
         assert directory != null;
 
         List<FileInfo> fileset = new ArrayList<>();
         boolean isOK = true;
-        final Path localPart = getLocalPathOf(directory);                       // throws RuntimeException if unable to get local path prefix of directory, but that should never happen
+        final Path splittedPath[] = splitLocalPathOf(directory);                       // throws RuntimeException if unable to get local path prefix of directory, but that should never happen
+
+        FilterRuleConfiguration localFilterRuleConfiguration;
+		try {
+			// FSTODO: directory to Path
+			localFilterRuleConfiguration = new FilterRuleConfiguration(parentFilterRuleConfiguration, directory.path().toString());
+		} catch (ArgumentParsingError e) {
+            if (_log.isLoggable(Level.WARNING)) {
+                _log.warning(String.format("Got argument parsing error " +
+                                           "at %s: %s",
+                                           directory.path(), e.getMessage()));
+            }
+            isOK = false;
+            return new StatusResult<List<FileInfo>>(isOK, fileset);
+		}
+        boolean filterByRules = localFilterRuleConfiguration.isFilterAvailable();
 
         // the JVM adds a lot of overhead when doing mostly directory traversals
         // and reading of file attributes
@@ -721,7 +852,8 @@ public class Sender implements RsyncTask,MessageHandler
                 Files.newDirectoryStream(directory.path())) {
 
             for (Path entry : stream) {
-                if (!PathOps.isPathPreservable(entry.getFileName())) {          // TODO: add option to continue anyway
+
+            	if (!PathOps.isPathPreservable(entry.getFileName())) {          // TODO: add option to continue anyway
                     if (_log.isLoggable(Level.WARNING)) {
                         _log.warning(String.format(
                             "Skipping %s - unable to preserve file name",
@@ -743,7 +875,7 @@ public class Sender implements RsyncTask,MessageHandler
                     continue;
                 }
 
-                Path relativePath = localPart.relativize(entry);
+                Path relativePath = splittedPath[0].relativize(entry);
                 String relativePathName =
                     Text.withSlashAsPathSepator(relativePath.toString());
                 byte[] pathNameBytes =
@@ -751,6 +883,12 @@ public class Sender implements RsyncTask,MessageHandler
                 if (pathNameBytes != null) {
                     FileInfo f = new FileInfo(entry, relativePath,
                                               pathNameBytes, attrs);    // throws IllegalArgumentException but that cannot happen
+
+                    // use filter
+                    if (filterByRules && localFilterRuleConfiguration.exclude(relativePathName, attrs.isDirectory())) {
+                		continue;
+                    }
+
                     fileset.add(f);
                 } else {
                     if (_log.isLoggable(Level.WARNING)) {
@@ -775,7 +913,7 @@ public class Sender implements RsyncTask,MessageHandler
     // TODO: FEATURE: (if possible in native) implement suspend/resume such that
     // we don't have to send/hold a full segment in memory at once (directories
     // can be very large).
-    private boolean expandAndSendSegments(Filelist fileList)
+    private boolean expandAndSendSegments(Filelist fileList, FilterRuleConfiguration parentFilterRuleConfiguration)
         throws ChannelException
     {
         boolean isOK = true;
@@ -805,7 +943,7 @@ public class Sender implements RsyncTask,MessageHandler
                 continue;
             }
 
-            StatusResult<List<FileInfo>> expandResult = expand(directory);
+            StatusResult<List<FileInfo>> expandResult = expand(directory, parentFilterRuleConfiguration);
             boolean isExpandOK = expandResult.isOK();
             if (!isExpandOK && _log.isLoggable(Level.WARNING)) {
                 _log.warning("initial file list expansion returned an error");
@@ -888,7 +1026,20 @@ public class Sender implements RsyncTask,MessageHandler
             xflags |= TransmitFlags.SAME_UID;
         }
 
-        xflags |= TransmitFlags.SAME_GID;
+        Group group = fileInfo.attrs().group();
+        if (_isPreserveGroup &&
+        		!group.equals(_fileInfoCache.getPrevGroupOrNull()))
+        {
+            _fileInfoCache.setPrevGroup(group);
+            if (!group.equals(Group.root())) {
+                if (_isRecursive && !_transferredGroupNames.contains(group)) {
+                    xflags |= TransmitFlags.GROUP_NAME_FOLLOWS;
+                } // else send in batch later
+                _transferredGroupNames.add(group);
+            }
+        } else {
+            xflags |= TransmitFlags.SAME_GID;
+        }
 
         long lastModified = attrs.lastModifiedTime();
         if (lastModified == _fileInfoCache.getPrevLastModified()) {
@@ -952,9 +1103,16 @@ public class Sender implements RsyncTask,MessageHandler
         }
 
         if (_isPreserveUser && ((xflags & TransmitFlags.SAME_UID) == 0)) {
-            sendUserId(user.uid());
+            sendUserId(user.id());
             if ((xflags & TransmitFlags.USER_NAME_FOLLOWS) != 0) {
                 sendUserName(user.name());
+            }
+        }
+
+        if (_isPreserveGroup && ((xflags & TransmitFlags.SAME_UID) == 0)) {
+            sendGroupId(group.id());
+            if ((xflags & TransmitFlags.GROUP_NAME_FOLLOWS) != 0) {
+                sendGroupName(group.name());
             }
         }
 
@@ -1221,7 +1379,7 @@ public class Sender implements RsyncTask,MessageHandler
         sendEncodedLong(stats.fileListTransferTime(), 3);
     }
 
-    private Path getLocalPathOf(FileInfo fileInfo)
+    private Path[] splitLocalPathOf(FileInfo fileInfo)
     {
         String pathName = _characterDecoder.decodeOrNull(fileInfo.pathNameBytes());
         if (pathName == null) {
@@ -1229,8 +1387,8 @@ public class Sender implements RsyncTask,MessageHandler
                 "unable to decode path name of %s using %s",
                 fileInfo, _characterDecoder.charset()));
         }
-        Path relativePath = Paths.get(pathName);
-        return PathOps.subtractPath(fileInfo.path(), relativePath);
+        Path relativePath = CustomFileSystem.getPath(pathName);
+        return new Path[]{PathOps.subtractPath(fileInfo.path(), relativePath), relativePath};
     }
 
     // FIXME: code duplication with Receiver, move to Connection?

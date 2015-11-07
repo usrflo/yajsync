@@ -79,13 +79,20 @@ public class FileInfo implements Comparable<FileInfo>
     @Override
     public int compareTo(FileInfo other)
     {
-        int result = compareUnixFileNamesBytes(_pathNameBytes,
+        /* int result = compareUnixFileNamesBytes(_pathNameBytes,
                                                _attrs.isDirectory(),
                                                other._pathNameBytes,
                                                other._attrs.isDirectory());
-        assert result != 0 || this.equals(other);
-        return result;
-    }
+   			assert result != 0 || this.equals(other);
+        		return result;
+    		}
+         */
+
+        if (_normalizedPath == null || other._normalizedPath == null) {
+            return (_normalizedPath == other._normalizedPath) ? 0:1;
+        }
+        return _normalizedPath.compareTo(other._normalizedPath);
+ }
 
     @Override
     public String toString()

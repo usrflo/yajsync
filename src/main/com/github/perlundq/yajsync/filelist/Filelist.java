@@ -33,14 +33,15 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.github.perlundq.yajsync.util.Environment;
+import com.github.perlundq.yajsync.util.SortedList;
 
 public class Filelist
 {
     public static class SegmentBuilder
     {
         private FileInfo _directory;
-        private List<FileInfo> _files = new LinkedList<>();
-        private List<FileInfo> _directories = new LinkedList<>();
+        private SortedList<FileInfo> _files = new SortedList<>();
+        private SortedList<FileInfo> _directories = new SortedList<>();
 
         public SegmentBuilder(FileInfo directory)
         {
@@ -87,6 +88,17 @@ public class Filelist
             for (FileInfo f : fileset) {
                 add(f);
             }
+        }
+
+        public int size()
+        {
+            return _files.size();
+        }
+
+        // O(log n) by SortedList
+        public boolean contains(FileInfo fileInfo)
+        {
+            return _files.containsElement(fileInfo);
         }
 
         private void clear()
@@ -310,13 +322,13 @@ public class Filelist
         return segment;
     }
 
-    private void extractStubDirectories(List<FileInfo> directories)
+    private void extractStubDirectories(SortedList<FileInfo> directories)
     {
         if (_log.isLoggable(Level.FINER)) {
             _log.finer("extracting all stub directories from " + directories);
         }
 
-        Collections.sort(directories);
+        // Collections.sort(directories);
         for (FileInfo f : directories) {
             assert f.attrs().isDirectory();
             if (!f.isDotDir()) {

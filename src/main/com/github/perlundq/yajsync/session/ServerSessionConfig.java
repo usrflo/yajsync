@@ -24,7 +24,6 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
@@ -34,6 +33,7 @@ import java.util.regex.Pattern;
 
 import com.github.perlundq.yajsync.channels.ChannelEOFException;
 import com.github.perlundq.yajsync.channels.ChannelException;
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.security.RsyncAuthContext;
 import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.text.TextConversionException;
@@ -59,6 +59,10 @@ public class ServerSessionConfig extends SessionConfig
     private boolean _isPreservePermissions = false;
     private boolean _isPreserveTimes = false;
     private boolean _isPreserveUser = false;
+    private boolean _isPreserveGroup = false;
+    private boolean _isNumericIds = false;
+    private boolean _isDelete = false;
+    private boolean _isDeleteExcluded = false;
     private boolean _isIgnoreTimes = false;
     private Module _module;
     private int _verbosity = 0;
@@ -210,6 +214,11 @@ public class ServerSessionConfig extends SessionConfig
         _module = module;
     }
 
+    public Module getModule()
+    {
+		return _module;
+    }
+
     /**
      * @throws TextConversionException
      */
@@ -309,6 +318,22 @@ public class ServerSessionConfig extends SessionConfig
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "group", "g", "",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        setIsPreserveGroup();
+                    }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "numeric-ids", "", "",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	setIsNumericIds();
+                    }}));
+
+        argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "perms", "p", "",
             new Option.ContinuingHandler() {
@@ -330,7 +355,24 @@ public class ServerSessionConfig extends SessionConfig
             "dirs", "d", "",
             new Option.ContinuingHandler() {
                 @Override public void handleAndContinue(Option option) {
-                _isTransferDirs = true;
+                	_isTransferDirs = true;
+                }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "delete", "", "",
+                new Option.ContinuingHandler() {
+                   @Override public void handleAndContinue(Option option) {
+                	   setIsDelete();
+                }}));
+
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "delete-excluded", "", "",
+                new Option.ContinuingHandler() {
+                   @Override public void handleAndContinue(Option option) {
+                	   setIsDeleteExcluded();
+                	   setIsDelete(); // implicit option
                 }}));
 
         // FIXME: let ModuleProvider mutate this argsParser instance before
@@ -340,6 +382,11 @@ public class ServerSessionConfig extends SessionConfig
         assert rc == ArgumentParser.Status.CONTINUE;
         assert !_isRecursiveTransfer || _isIncrementalRecurse :
                "We support only incremental recursive transfers for now";
+
+        if (!(_isTransferDirs || _isRecursiveTransfer) && _isDelete) {
+        	throw new RsyncProtocolException(
+        		"--delete does not work without --recursive (-r) or --dirs (-d).");
+        }
 
         if (!isSender() && !_module.isWritable()) {
             throw new RsyncProtocolException(
@@ -368,7 +415,7 @@ public class ServerSessionConfig extends SessionConfig
                                       fileName));
                 }
                 Path safePath =
-                    _module.restrictedPath().resolve(Paths.get(fileName));
+                    _module.restrictedPath().resolve(CustomFileSystem.getPath(fileName));
                 if (Text.isNameDotDir(fileName)) {
                     safePath = safePath.resolve(PathOps.DOT_DIR);
                 }
@@ -384,7 +431,7 @@ public class ServerSessionConfig extends SessionConfig
                     unnamed, unnamed.size()));
             }
             String fileName = unnamed.get(0);
-            Path safePath = _module.restrictedPath().resolve(Paths.get(fileName));
+            Path safePath = _module.restrictedPath().resolve(CustomFileSystem.getPath(fileName));
             _receiverDestination = safePath.normalize();
 
             if (_log.isLoggable(Level.FINE)) {
@@ -463,6 +510,26 @@ public class ServerSessionConfig extends SessionConfig
         _isPreserveUser = true;
     }
 
+    private void setIsPreserveGroup()
+    {
+        _isPreserveGroup = true;
+    }
+
+    private void setIsNumericIds()
+    {
+        _isNumericIds = true;
+    }
+
+    private void setIsDelete()
+    {
+        _isDelete = true;
+    }
+
+    private void setIsDeleteExcluded()
+    {
+        _isDeleteExcluded = true;
+    }
+
     private void setIsIgnoreTimes()
     {
         _isIgnoreTimes = true;
@@ -496,6 +563,24 @@ public class ServerSessionConfig extends SessionConfig
     public boolean isPreserveUser()
     {
         return _isPreserveUser;
+    }
+
+    public boolean isPreserveGroup()
+    {
+        return _isPreserveGroup;
+    }
+
+    public boolean isNumericIds()
+    {
+        return _isNumericIds;
+    }
+
+    public boolean isDelete() {
+    	return _isDelete;
+    }
+
+    public boolean isDeleteExcluded() {
+    	return _isDeleteExcluded;
     }
 
     public boolean isIgnoreTimes()

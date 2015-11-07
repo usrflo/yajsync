@@ -22,11 +22,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.UserPrincipal;
 
+import com.github.perlundq.yajsync.filelist.Group;
 import com.github.perlundq.yajsync.filelist.User;
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.text.Text;
 
 public final class Environment
@@ -59,18 +60,27 @@ public final class Environment
     {
         String uidString = System.getProperty(PROPERTY_KEY_USER_UID);
         if (uidString == null) {
-            return User.nobody().uid();
+            return User.nobody().id();
         }
         int uid = Integer.parseInt(uidString);
-        if (uid < 0 || uid > User.UID_MAX) {
-            return User.nobody().uid();
+        if (uid < 0 || uid > User.ID_MAX) {
+            return User.nobody().id();
         }
         return uid;
     }
 
-    public static String getGroupId()
+    public static int getGroupId()
     {
-        return getNonNullProperty(PROPERTY_KEY_GROUP_UID);
+    	String gidString = System.getProperty(PROPERTY_KEY_GROUP_UID);
+        if (gidString == null) {
+            return Group.nobody().id();
+        }
+        int gid = Integer.parseInt(gidString);
+        if (gid < 0 || gid > Group.ID_MAX) {
+            return Group.nobody().id();
+        }
+        return gid;
+
     }
 
     public static String getUserName()
@@ -80,7 +90,7 @@ public final class Environment
 
     public static String getGroupName()
     {
-        return getNonNullProperty(PROPERTY_KEY_GROUP_NAME);
+    	return getPropertyOrDefault(PROPERTY_KEY_GROUP_NAME, Group.nobody().name());
     }
 
     public static UserPrincipal getUserPrincipal()
@@ -107,14 +117,14 @@ public final class Environment
 
     public static Path getWorkingDirectory()
     {
-        return Paths.get(getNonNullProperty(PROPERTY_KEY_CWD));
+    	return CustomFileSystem.getPath(getNonNullProperty(PROPERTY_KEY_CWD));
     }
 
     public static String getServerConfig(String defName)
     {
         return getPropertyOrDefault(PROPERTY_SERVER_CONFIG, defName);
     }
-
+    
     private static String getNonNullProperty(String key)
     {
         String value = System.getProperty(key);

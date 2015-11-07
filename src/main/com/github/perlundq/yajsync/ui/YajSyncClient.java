@@ -48,6 +48,7 @@ import com.github.perlundq.yajsync.channels.net.DuplexByteChannel;
 import com.github.perlundq.yajsync.channels.net.SSLChannelFactory;
 import com.github.perlundq.yajsync.channels.net.StandardChannelFactory;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.session.ClientSessionConfig;
 import com.github.perlundq.yajsync.session.RsyncClientSession;
 import com.github.perlundq.yajsync.session.RsyncException;
@@ -211,7 +212,7 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         private static String toLocalPathName(String pathName)
         {
             assert !pathName.isEmpty();
-            Path p = Paths.get(pathName);
+            Path p = CustomFileSystem.getPath(pathName);
             if (pathName.endsWith(Text.SLASH)) {
                 p = p.resolve(PathOps.DOT_DIR);  // Paths.get returns normalized path, any trailing slash is not preserved
             }
@@ -242,13 +243,19 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
     private boolean _isIgnoreTimes;
     private boolean _isRecursiveTransfer;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
     private boolean _isRemote;
     private boolean _isSender;
     private boolean _isShowStatistics;
     private int _remotePort = Consts.DEFAULT_LISTEN_PORT;
     private int _verbosity = 0;
+    private final List<String> _inputFilterRules = new LinkedList<>();
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private final List<String> _srcArgs = new LinkedList<>();
     private Statistics _statistics;
     private String _address;
@@ -419,13 +426,54 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
 
         options.add(
                 Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "group", "g",
+                                          String.format("preserve group " +
+                                                        "(default %s)",
+                                                        _isPreserveGroup),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        _isPreserveGroup = true;
+                    }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "numeric-ids", "",
+                                          String.format("don't map uid/gid values by user/group name " +
+                                                        "(default %s)",
+                                                        _isNumericIds),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_isNumericIds = true;
+                    }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
                                           "ignore-times", "I",
                                           String.format("don't skip files that match size and time " +
                                                         "(default %s)",
                                                         _isIgnoreTimes),
                 new Option.ContinuingHandler() {
                     @Override public void handleAndContinue(Option option) {
-                        _isIgnoreTimes  = true;
+                        _isIgnoreTimes = true;
+                    }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "delete", "",
+                                          String.format("delete extraneous files from dest dirs"),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        _isDelete = true;
+                    }}));
+
+        options.add(
+                Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                          "delete-excluded", "",
+                                          String.format("also delete excluded files from dest dirs"),
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                        _isDeleteExcluded = true;
+                        _isDelete = true; // implicit option
                     }}));
 
         options.add(
@@ -498,6 +546,46 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
                 }
             }
         }));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "filter", "f", "add a file-filtering RULE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add((String) option.getValue());
+                    }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "exclude", "", "exclude files matching PATTERN",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add("- " + (String) option.getValue());
+                    }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "exclude-from", "", "read exclude patterns from FILE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add("merge,- " + (String) option.getValue());
+                    }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "include", "", "don't exclude files matching PATTERN",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add("+ " + (String) option.getValue());
+                    }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                       	"include-from", "", "read list of source-file names from FILE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) {
+                    	_inputFilterRules.add("merge,+ " + (String) option.getValue());
+                    }}));
 
         return options;
     }
@@ -628,6 +716,14 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             } else {
                 parseUnnamedArgs(argsParser.getUnnamedArguments());
             }
+
+            _filterRuleConfiguration = new FilterRuleConfiguration(_inputFilterRules);
+
+            if (!(_isTransferDirs || _isRecursiveTransfer) && _isDelete) {
+            	throw new ArgumentParsingError(
+            		"--delete does not work without --recursive (-r) or --dirs (-d).");
+            }
+
         } catch (ArgumentParsingError e) {
             _err.println(e.getMessage());
             _err.println(argsParser.toUsageString());
@@ -674,8 +770,13 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         session.setIsPreservePermissions(_isPreservePermissions);
         session.setIsPreserveTimes(_isPreserveTimes);
         session.setIsPreserveUser(_isPreserveUser);
+        session.setIsPreserveGroup(_isPreserveGroup);
+        session.setIsNumericIds(_isNumericIds);
         session.setIsIgnoreTimes(_isIgnoreTimes);
         session.setIsRecursiveTransfer(_isRecursiveTransfer);
+        session.setIsDelete(_isDelete);
+        session.setIsDeleteExcluded(_isDeleteExcluded);
+        session.setFilterRuleConfiguration(_filterRuleConfiguration);
         session.setIsSender(_isSender);
         session.setIsTransferDirs(_isTransferDirs);
 
@@ -745,12 +846,17 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         localTransfer.setIsPreservePermissions(_isPreservePermissions);
         localTransfer.setIsPreserveTimes(_isPreserveTimes);
         localTransfer.setIsPreserveUser(_isPreserveUser);
+        localTransfer.setIsPreserveGroup(_isPreserveGroup);
+        localTransfer.setIsNumericIds(_isNumericIds);
+        localTransfer.setIsDelete(_isDelete);
+        localTransfer.setIsDeleteExcluded(_isDeleteExcluded);
         localTransfer.setIsIgnoreTimes(_isIgnoreTimes);
         localTransfer.setIsDeferredWrite(_isDeferredWrite);
         localTransfer.setIsTransferDirs(_isTransferDirs);
+        localTransfer.setFilterRuleConfiguration(_filterRuleConfiguration);
         List<Path> srcPaths = new LinkedList<>();
         for (String pathName : _srcArgs) {
-            srcPaths.add(Paths.get(pathName));                                  // throws InvalidPathException
+        	srcPaths.add(CustomFileSystem.getPath(pathName));                                  // throws InvalidPathException
         }
 
         try {

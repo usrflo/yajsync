@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 
 import com.github.perlundq.yajsync.text.Text;
+import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
 import com.github.perlundq.yajsync.util.BitOps;
 
 public class RsyncLocal
@@ -35,8 +36,13 @@ public class RsyncLocal
     private boolean _isPreservePermissions;
     private boolean _isPreserveTimes;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
     private boolean _isIgnoreTimes;
     private boolean _isDeferredWrite;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
     private Statistics _statistics = new Statistics();
     private boolean _isTransferDirs = false;
@@ -79,6 +85,26 @@ public class RsyncLocal
         _isPreserveUser = isPreserveUser;
     }
 
+    public void setIsPreserveGroup(boolean isPreserveGroup)
+    {
+        _isPreserveGroup = isPreserveGroup;
+    }
+
+    public void setIsNumericIds(boolean isNumericIds)
+    {
+        _isNumericIds = isNumericIds;
+    }
+
+    public void setIsDelete(boolean isDelete)
+    {
+        _isDelete = isDelete;
+    }
+
+    public void setIsDeleteExcluded(boolean isDeleteExcluded)
+    {
+    	_isDeleteExcluded = isDeleteExcluded;
+    }
+
     public void setIsIgnoreTimes(boolean isIgnoreTimes)
     {
         _isIgnoreTimes = isIgnoreTimes;
@@ -93,6 +119,11 @@ public class RsyncLocal
     {
         _isTransferDirs = isTransferDirs;
     }
+
+    public void setFilterRuleConfiguration(
+    		FilterRuleConfiguration filterRuleConfiguration) {
+		_filterRuleConfiguration = filterRuleConfiguration;
+	}
 
     private Pipe[] pipePair()
     {
@@ -124,8 +155,13 @@ public class RsyncLocal
                                    _charset,
                                    checksumSeed).
             setIsPreserveUser(_isPreserveUser).
+            setIsPreserveGroup(_isPreserveGroup).
+            setIsNumericIds(_isNumericIds).
+            setIsDelete(_isDelete).
+            setIsDeleteExcluded(_isDeleteExcluded).
             setIsExitEarlyIfEmptyList(true).
             setIsRecursive(_isRecursiveTransfer).
+            setFilterRuleConfiguration(_filterRuleConfiguration).
             setIsTransferDirs(isTransferDirs);
         Generator generator = new Generator(toSender.sink(), _charset,
                                             checksumSeed, out).
@@ -133,6 +169,8 @@ public class RsyncLocal
             setIsPreservePermissions(_isPreservePermissions).
             setIsPreserveTimes(_isPreserveTimes).
             setIsPreserveUser(_isPreserveUser).
+            setIsPreserveGroup(_isPreserveGroup).
+            setIsNumericIds(_isNumericIds).
             setIsIgnoreTimes(_isIgnoreTimes).
             setIsListOnly(_isModuleListing).
             setIsAlwaysItemize(_verbosity > 1);
@@ -145,6 +183,10 @@ public class RsyncLocal
             setIsPreservePermissions(_isPreservePermissions).
             setIsPreserveTimes(_isPreserveTimes).
             setIsPreserveUser(_isPreserveUser).
+            setIsPreserveGroup(_isPreserveGroup).
+            setIsNumericIds(_isNumericIds).
+            setIsDelete(_isDelete).
+            setIsDeleteExcluded(_isDeleteExcluded).
             setIsListOnly(_isModuleListing).
             setIsDeferredWrite(_isDeferredWrite);
 

@@ -69,10 +69,14 @@ public class RsyncServerSession
                                                      cfg.checksumSeed()).
                 setIsRecursive(cfg.isRecursive()).
                 setIsPreserveUser(cfg.isPreserveUser()).
+                setIsPreserveGroup(cfg.isPreserveGroup()).
+                setIsNumericIds(cfg.isNumericIds()).
+                setIsDelete(cfg.isDelete()).
+                setIsDeleteExcluded(cfg.isDeleteExcluded()).
                 setIsInterruptible(isChannelsInterruptible).
                 setIsSafeFileList(cfg.isSafeFileList()).
                 setIsTransferDirs(cfg.isTransferDirs());
-            return RsyncTaskExecutor.exec(executor, sender);
+            return RsyncTaskExecutor.exec(executor, cfg.getModule(), sender);
         } else {
             Generator generator =
                 Generator.newServerInstance(out, cfg.charset(),
@@ -81,6 +85,8 @@ public class RsyncServerSession
                     setIsPreservePermissions(cfg.isPreservePermissions()).
                     setIsPreserveTimes(cfg.isPreserveTimes()).
                     setIsPreserveUser(cfg.isPreserveUser()).
+                    setIsPreserveGroup(cfg.isPreserveGroup()).
+                    setIsNumericIds(cfg.isNumericIds()).
                     setIsIgnoreTimes(cfg.isIgnoreTimes()).
                     setIsAlwaysItemize(cfg.verbosity() > 1).
                     setIsInterruptible(isChannelsInterruptible);
@@ -91,11 +97,15 @@ public class RsyncServerSession
                     setIsPreservePermissions(cfg.isPreservePermissions()).
                     setIsPreserveTimes(cfg.isPreserveTimes()).
                     setIsPreserveUser(cfg.isPreserveUser()).
+                    setIsPreserveGroup(cfg.isPreserveGroup()).
+                    setIsNumericIds(cfg.isNumericIds()).
+                    setIsDelete(cfg.isDelete()).
+                    setIsDeleteExcluded(cfg.isDeleteExcluded()).
                     setIsDeferredWrite(_isDeferredWrite).
                     setIsInterruptible(isChannelsInterruptible).
                     setIsSafeFileList(cfg.isSafeFileList());
 
-            return RsyncTaskExecutor.exec(executor, generator,
+            return RsyncTaskExecutor.exec(executor, cfg.getModule(), generator,
                                                     receiver);
         }
     }

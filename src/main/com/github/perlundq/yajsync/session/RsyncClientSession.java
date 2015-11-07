@@ -24,13 +24,14 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
+import com.github.perlundq.yajsync.io.CustomFileSystem;
 import com.github.perlundq.yajsync.session.ClientSessionConfig.AuthProvider;
 import com.github.perlundq.yajsync.text.Text;
+import com.github.perlundq.yajsync.ui.FilterRuleConfiguration;
 
 public class RsyncClientSession
 {
@@ -39,11 +40,16 @@ public class RsyncClientSession
     private boolean _isPreserveTimes;
     private boolean _isRecursiveTransfer;
     private boolean _isSender;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private Charset _charset = Charset.forName(Text.UTF8_NAME);
     private int _verbosity;
     private Statistics _statistics = new Statistics();
     private boolean _isPreservePermissions;
     private boolean _isPreserveUser;
+    private boolean _isPreserveGroup;
+    private boolean _isNumericIds;
+    private boolean _isDelete;
+    private boolean _isDeleteExcluded;
     private boolean _isIgnoreTimes;
     private boolean _isTransferDirs;
 
@@ -61,9 +67,21 @@ public class RsyncClientSession
         return this;
     }
 
-    public RsyncClientSession setIsPreserveUser(boolean isPreservedUser)
+    public RsyncClientSession setIsPreserveUser(boolean isPreserveUser)
     {
-        _isPreserveUser = isPreservedUser;
+        _isPreserveUser = isPreserveUser;
+        return this;
+    }
+
+    public RsyncClientSession setIsPreserveGroup(boolean isPreserveGroup)
+    {
+        _isPreserveGroup = isPreserveGroup;
+        return this;
+    }
+
+    public RsyncClientSession setIsNumericIds(boolean isNumericIds)
+    {
+    	_isNumericIds = isNumericIds;
         return this;
     }
 
@@ -103,6 +121,24 @@ public class RsyncClientSession
         return this;
     }
 
+    public RsyncClientSession setIsDelete(boolean isDelete)
+    {
+        _isDelete = isDelete;
+        return this;
+    }
+
+    public RsyncClientSession setIsDeleteExcluded(boolean isDeleteExcluded)
+    {
+        _isDeleteExcluded = isDeleteExcluded;
+        return this;
+    }
+
+    public RsyncClientSession setFilterRuleConfiguration(
+    		FilterRuleConfiguration filterRuleConfiguration) {
+    	_filterRuleConfiguration = filterRuleConfiguration;
+    	return this;
+    }
+
     public RsyncClientSession setIsTransferDirs(boolean isTransferDirs)
     {
         _isTransferDirs = isTransferDirs;
@@ -139,6 +175,9 @@ public class RsyncClientSession
         if (_isPreserveUser) {
             sb.append("o");
         }
+        if (_isPreserveGroup) {
+            sb.append("g");
+        }
         if (_isIgnoreTimes) {
             sb.append("I");
         }
@@ -156,6 +195,16 @@ public class RsyncClientSession
         // revisit if we add support for --iconv
         serverArgs.add(sb.toString());
 
+        if (_isNumericIds) {
+        	serverArgs.add("--numeric-ids");
+        }
+        if (_isDelete) {
+        	serverArgs.add("--delete");
+        }
+        if (_isDeleteExcluded) {
+        	serverArgs.add("--delete-excluded");
+        }
+
         serverArgs.add("."); // arg delimiter
 
         if (_isSender) {
@@ -171,7 +220,7 @@ public class RsyncClientSession
     {
         List<Path> result = new LinkedList<>();
         for (String pathName : pathNames) {
-            result.add(Paths.get(pathName));
+            result.add(CustomFileSystem.getPath(pathName));
         }
         return result;
     }
@@ -215,7 +264,8 @@ public class RsyncClientSession
                 setIsRecursive(_isRecursiveTransfer).
                 setIsPreserveUser(_isPreserveUser).
                 setIsInterruptible(isChannelsInterruptible).
-                setIsSafeFileList(cfg.isSafeFileList());
+                setIsSafeFileList(cfg.isSafeFileList()).
+                setFilterRuleConfiguration(_filterRuleConfiguration);
             boolean isTransferDirs = _isTransferDirs ||
                                      _isModuleListing && !_isRecursiveTransfer;
             sender.setIsTransferDirs(isTransferDirs);
@@ -231,18 +281,25 @@ public class RsyncClientSession
                     setIsPreservePermissions(_isPreservePermissions).
                     setIsPreserveTimes(_isPreserveTimes).
                     setIsPreserveUser(_isPreserveUser).
+                    setIsPreserveGroup(_isPreserveGroup).
+                    setIsNumericIds(_isNumericIds).
                     setIsIgnoreTimes(_isIgnoreTimes).
                     setIsAlwaysItemize(_verbosity > 1).
                     setIsListOnly(_isModuleListing).
                     setIsInterruptible(isChannelsInterruptible);
             Receiver receiver = new Receiver(generator, in, _charset, dstArg).
                 setIsSendFilterRules(true).
+                setFilterRuleConfiguration(_filterRuleConfiguration).
                 setIsReceiveStatistics(true).
                 setIsExitEarlyIfEmptyList(true).
                 setIsRecursive(_isRecursiveTransfer).
                 setIsPreservePermissions(_isPreservePermissions).
                 setIsPreserveTimes(_isPreserveTimes).
                 setIsPreserveUser(_isPreserveUser).
+                setIsPreserveGroup(_isPreserveGroup).
+                setIsNumericIds(_isNumericIds).
+                setIsDelete(_isDelete).
+                setIsDeleteExcluded(_isDeleteExcluded).
                 setIsListOnly(_isModuleListing).
                 setIsDeferredWrite(_isDeferredWrite).
                 setIsInterruptible(isChannelsInterruptible).
