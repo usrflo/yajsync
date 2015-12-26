@@ -25,9 +25,12 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 import com.github.perlundq.yajsync.filelist.FilterRuleList;
+import com.github.perlundq.yajsync.filelist.FilterRuleList.Result;
 import com.github.perlundq.yajsync.util.ArgumentParsingError;
 
 public class FilterRuleConfiguration {
@@ -48,7 +51,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public FilterRuleConfiguration(
-			FilterRuleConfiguration parentRuleConfiguration, String dirname)
+			FilterRuleConfiguration parentRuleConfiguration, Path directory)
 			throws ArgumentParsingError {
 
 		_parentRuleConfiguration = parentRuleConfiguration;
@@ -56,7 +59,7 @@ public class FilterRuleConfiguration {
 			_inheritance = _parentRuleConfiguration.isInheritance();
 			_dirMergeFilename = _parentRuleConfiguration.getDirMergeFilename();
 		}
-		_dirname = dirname;
+		_dirname = directory.toString();
 
 		// directory specific initialization of rules, FSTODO: no inheritance?
 		// _mergeRuleList = parentRuleConfiguration.getMergeRuleList();
@@ -65,7 +68,7 @@ public class FilterRuleConfiguration {
 		if (_dirMergeFilename != null
 				&& (new File(_dirname + "/" + _dirMergeFilename)).exists()) {
 			// merge local filter rule file
-			readRule(". " + dirname + "/" + _dirMergeFilename);
+			readRule(". " + _dirname + "/" + _dirMergeFilename);
 		}
 	}
 
@@ -100,10 +103,14 @@ public class FilterRuleConfiguration {
 
 				// _mergeRuleList.add(new MergeRule(m, splittedRule[1].trim()));
 
-				String _mergeFilename = splittedRule[1].trim();
+				// String _mergeFilename = splittedRule[1].trim();
+				Path _mergeFilename = Paths.get(splittedRule[1].trim());
+				Path _absoluteMergeFilename = _mergeFilename;
+				if (!_absoluteMergeFilename.isAbsolute()) {
+					_absoluteMergeFilename = Paths.get(_dirname, splittedRule[1].trim());
+				}
 
-				try (BufferedReader br = new BufferedReader(new FileReader(
-						_dirname + "/" + _mergeFilename))) {
+				try (BufferedReader br = new BufferedReader(new FileReader(_absoluteMergeFilename.toString()))) {
 					String line = br.readLine();
 					while (line != null) {
 						line = line.trim();
@@ -187,12 +194,13 @@ public class FilterRuleConfiguration {
 		}
 	} */
 
-	public boolean include(String filename, boolean isDirectory) {
+	public Result check(String filename, boolean isDirectory) {
 
 		assureDirectoryPathname(filename, isDirectory);
 
-		if (_localRuleList.include(filename, isDirectory)) {
-			return true;
+		Result result = _localRuleList.check(filename, isDirectory);
+		if (result!=Result.NEUTRAL) {
+			return result;
 		}
 
 		// search root and check against root only
@@ -200,32 +208,30 @@ public class FilterRuleConfiguration {
 		while (parent.getParentRuleConfiguration() != null) {
 			parent = parent.getParentRuleConfiguration();
 			if (parent.isInheritance()) {
-				if (parent.include(filename, isDirectory)) {
-					return true;
+				result = parent.check(filename, isDirectory);
+				if (result!=Result.NEUTRAL) {
+					return result;
 				}
 			}
 		}
 
-		return false;
+		// inclusion by default
+		return Result.NEUTRAL;
+	}
+
+	public boolean include(String filename, boolean isDirectory) {
+		Result result = this.check(filename, isDirectory);
+		if (result==Result.EXCLUDED) {
+			return false;
+		}
+
+		return true;
 	}
 
 	public boolean exclude(String filename, boolean isDirectory) {
-
-		filename = assureDirectoryPathname(filename, isDirectory);
-
-		if (_localRuleList.exclude(filename, isDirectory)) {
+		Result result = this.check(filename, isDirectory);
+		if (result==Result.EXCLUDED) {
 			return true;
-		}
-
-		// search root and check against root only
-		FilterRuleConfiguration parent = this;
-		while (parent.getParentRuleConfiguration() != null) {
-			parent = parent.getParentRuleConfiguration();
-			if (parent.isInheritance()) {
-				if (parent.exclude(filename, isDirectory)) {
-					return true;
-				}
-			}
 		}
 
 		return false;

@@ -5,6 +5,7 @@ import static org.junit.Assert.assertEquals;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.Path;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -13,13 +14,13 @@ import com.github.perlundq.yajsync.util.ArgumentParsingError;
 
 public class FilterRuleConfigurationTest {
 
-	private static String rootDirectory;
+	private static Path rootDirectory;
 	private static String mergeFile;
 
 	@BeforeClass
 	public static void beforeClass() throws IOException {
 		File f = File.createTempFile(".rsyncMerge", ".filter");
-		rootDirectory = f.getParentFile().getAbsolutePath();
+		rootDirectory = f.getParentFile().toPath().toAbsolutePath();
 		mergeFile = f.getName();
 
 		PrintWriter writer = new PrintWriter(f);
@@ -96,57 +97,59 @@ public class FilterRuleConfigurationTest {
 	@Test
 	public void test4a() throws ArgumentParsingError {
 
-		FilterRuleConfiguration cfg = new FilterRuleConfiguration(null,
+		FilterRuleConfiguration parentCfg = new FilterRuleConfiguration(null,
 				rootDirectory);
-		cfg.readRule("+ test");
-		cfg.readRule("merge,e " + mergeFile);
+		parentCfg.readRule("+ test");
+		parentCfg.readRule("merge,e " + mergeFile);
+
+		FilterRuleConfiguration dirCfg = new FilterRuleConfiguration(parentCfg, rootDirectory);
 
 		assertEquals(
 				true,
-				cfg.include("test", false) && !cfg.include(mergeFile, false)
-						&& cfg.include("abc", false)
-						&& !cfg.include("def", false));
+				dirCfg.include("test", false) && !dirCfg.include(mergeFile, false)
+						&& dirCfg.include("abc", false)
+						&& !dirCfg.include("def", false));
 	}
 
 	@Test
 	public void test5() throws ArgumentParsingError {
 
-		FilterRuleConfiguration cfg = new FilterRuleConfiguration(null,
+		FilterRuleConfiguration parentCfg = new FilterRuleConfiguration(null,
 				rootDirectory);
-		cfg.readRule("+ test");
-		cfg.readRule("dir-merge,n " + mergeFile);
+		parentCfg.readRule("+ test");
+		parentCfg.readRule("dir-merge,n " + mergeFile);	// non-inherited per-dir rules
 
-		FilterRuleConfiguration subCfg = new FilterRuleConfiguration(cfg,
+		FilterRuleConfiguration dirCfg = new FilterRuleConfiguration(parentCfg,
 				rootDirectory);
-		subCfg.readRule("+ test");
+		dirCfg.readRule("+ test");
 
 		assertEquals(
 				true,
-				cfg.include("test", false) && !cfg.include(mergeFile, false)
-						&& cfg.include("abc", false)
-						&& !cfg.include("def", false)
-						&& subCfg.include("test", false)
-						&& !subCfg.include("abc", false)
-						&& !subCfg.include("def", false));
+				parentCfg.include("test", false) && dirCfg.include(mergeFile, false)
+						&& parentCfg.include("abc", false)
+						&& parentCfg.include("def", false)
+						&& dirCfg.include("test", false)
+						&& dirCfg.include("abc", false)
+						&& !dirCfg.include("def", false));
 	}
 
 	@Test
 	public void test5a() throws ArgumentParsingError {
 
-		FilterRuleConfiguration cfg = new FilterRuleConfiguration(null,
+		FilterRuleConfiguration parentCfg = new FilterRuleConfiguration(null,
 				rootDirectory);
-		cfg.readRule("+ test");
-		cfg.readRule("dir-merge " + mergeFile);
+		parentCfg.readRule("+ test");
+		parentCfg.readRule("dir-merge " + mergeFile);
 
-		FilterRuleConfiguration subCfg = new FilterRuleConfiguration(cfg,
+		FilterRuleConfiguration subCfg = new FilterRuleConfiguration(parentCfg,
 				rootDirectory);
 		subCfg.readRule("+ test");
 
 		assertEquals(
 				true,
-				cfg.include("test", false) && !cfg.include(mergeFile, false)
-						&& cfg.include("abc", false)
-						&& !cfg.include("def", false)
+				parentCfg.include("test", false) && parentCfg.include(mergeFile, false)
+						&& parentCfg.include("abc", false)
+						&& parentCfg.include("def", false)
 						&& subCfg.include("test", false)
 						&& subCfg.include("abc", false)
 						&& !subCfg.include("def", false));
@@ -155,24 +158,22 @@ public class FilterRuleConfigurationTest {
 	@Test
 	public void test6() throws ArgumentParsingError {
 
-		FilterRuleConfiguration cfg = new FilterRuleConfiguration(null,
+		FilterRuleConfiguration parentCfg = new FilterRuleConfiguration(null,
 				rootDirectory);
-		cfg.readRule("merge " + mergeFile);
-		cfg.readRule("+ *");
+		parentCfg.readRule("merge " + mergeFile);
+		parentCfg.readRule("+ *");
 
-		FilterRuleConfiguration subCfg = new FilterRuleConfiguration(cfg,
+		FilterRuleConfiguration dirCfg = new FilterRuleConfiguration(parentCfg,
 				rootDirectory);
-		subCfg.readRule("+ test");
-
-		boolean result = !cfg.include("def", false);
+		dirCfg.readRule("+ test");
 
 		assertEquals(
 				true,
-				cfg.include("test", false) && cfg.include(mergeFile, false)
-						&& cfg.include("abc", false)
-						&& !cfg.include("def", false)
-						&& subCfg.include("test", false)
-						&& subCfg.include("ghi", false)
-						&& !subCfg.include("def", false));
+				parentCfg.include("test", false) && dirCfg.include(mergeFile, false)
+						&& dirCfg.include("abc", false)
+						&& !parentCfg.include("def", false)
+						&& dirCfg.include("test", false)
+						&& dirCfg.include("ghi", false)
+						&& !dirCfg.include("def", false));
 	}
 }

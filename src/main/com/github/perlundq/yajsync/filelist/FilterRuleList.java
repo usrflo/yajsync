@@ -30,15 +30,15 @@ public class FilterRuleList {
 
 	public List<FilterRule> _rules = new ArrayList<FilterRule>();
 
+	public enum Result {
+		EXCLUDED, INCLUDED, NEUTRAL
+	}
+
 	public void addRule(String rule) throws ArgumentParsingError {
 		_rules.add(new FilterRule(rule));
 	}
 
-	public boolean include(String filename, boolean isDirectory) {
-		return !exclude(filename, isDirectory);
-	}
-
-	public boolean exclude(String filename, boolean isDirectory) {
+	public Result check(String filename, boolean isDirectory) {
 
 		for (FilterRule rule : _rules) {
 
@@ -52,17 +52,14 @@ public class FilterRuleList {
 				 * first matching rule matters
 				 */
 				if (rule.isInclusion()) {
-					return false;
+					return Result.INCLUDED;
 				} else {
-					return true;
+					return Result.EXCLUDED;
 				}
 			}
 		}
 
-		/*
-		 * include by default
-		 */
-		return false;
+		return Result.NEUTRAL;
 	}
 
 	/*

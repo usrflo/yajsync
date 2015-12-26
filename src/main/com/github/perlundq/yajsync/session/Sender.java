@@ -834,7 +834,7 @@ public class Sender implements RsyncTask,MessageHandler
         FilterRuleConfiguration localFilterRuleConfiguration;
 		try {
 			// FSTODO: directory to Path
-			localFilterRuleConfiguration = new FilterRuleConfiguration(parentFilterRuleConfiguration, directory.path().toString());
+			localFilterRuleConfiguration = new FilterRuleConfiguration(parentFilterRuleConfiguration, directory.path());
 		} catch (ArgumentParsingError e) {
             if (_log.isLoggable(Level.WARNING)) {
                 _log.warning(String.format("Got argument parsing error " +
