@@ -176,4 +176,30 @@ public class FilterRuleConfigurationTest {
 						&& dirCfg.include("ghi", false)
 						&& !dirCfg.include("def", false));
 	}
+
+	@Test
+	public void testProtection() throws ArgumentParsingError {
+
+		FilterRuleConfiguration parentCfg = new FilterRuleConfiguration(null,
+				rootDirectory);
+		parentCfg.readRule("merge " + mergeFile);
+		parentCfg.readRule("+ *");
+
+		FilterRuleConfiguration dirCfg = new FilterRuleConfiguration(parentCfg,
+				rootDirectory);
+		dirCfg.readRule("+ test");
+		dirCfg.readRule("P test");
+		dirCfg.readRule("R test2");
+
+		assertEquals(
+				true,
+				parentCfg.include("test", false) && dirCfg.include(mergeFile, false)
+						&& dirCfg.include("abc", false)
+						&& !parentCfg.include("def", false)
+						&& dirCfg.include("test", false)
+						&& dirCfg.include("ghi", false)
+						&& !dirCfg.include("def", false)
+						&& dirCfg.protect("test", false)
+						&& dirCfg.risk("test2", false));
+	}
 }

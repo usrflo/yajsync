@@ -713,6 +713,48 @@ public class SystemTest
     }
 
     @Test
+    public void testClientDirCopyDstDeleteExcludedAndProtect() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile2);
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir1 = copyOfSrc.resolve("dir");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1");
+        FileUtil.writeToFiles(9, dstFile1);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete-excluded", "--exclude=file1", "--filter=\"protect file1\"");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+
+        assertTrue(Files.exists(dstFile1));
+        Files.deleteIfExists(srcFile1);
+        Files.deleteIfExists(dstFile1);
+
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
     public void testCopyFileMultipleBlockSize() throws IOException
     {
         Path src = _tempDir.newFile().toPath();

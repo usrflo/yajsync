@@ -1904,8 +1904,16 @@ public class Receiver implements RsyncTask,MessageHandler
             FileInfo fileInfo = new FileInfo(entry, relativePath,
                                        pathNameBytes, RsyncFileAttributes.stat(entry));
 
+            boolean isDirectory = Files.isDirectory(entry);
+            String filename = "./"+relativePathName;
+
+            // detect protection
+            if (_filterRuleConfiguration.protect(filename, isDirectory)) {
+            	return false;
+            }
+
             // detect exclusion, TODO: check path conversion
-            boolean isEntryExcluded = _filterRuleConfiguration.exclude("./"+relativePathName, Files.isDirectory(entry));
+            boolean isEntryExcluded = _filterRuleConfiguration.exclude(filename, isDirectory);
 
             if (!isEntryExcluded && _isDelete && !builder.contains(fileInfo)) {
             	PathOps.deleteIfExists(fileInfo.path(), basePath);

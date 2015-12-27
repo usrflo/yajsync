@@ -31,7 +31,12 @@ public class FilterRuleList {
 	public List<FilterRule> _rules = new ArrayList<FilterRule>();
 
 	public enum Result {
-		EXCLUDED, INCLUDED, NEUTRAL
+		EXCLUDED /* PROTECTED */, INCLUDED /* RISK */ , NEUTRAL
+	}
+
+	public FilterRuleList addList(FilterRuleList list) {
+		this._rules.addAll(list._rules);
+		return this;
 	}
 
 	public void addRule(String rule) throws ArgumentParsingError {
@@ -72,6 +77,7 @@ public class FilterRuleList {
 		private final boolean _absoluteMatching;
 		private final boolean _negateMatching;
 		private final boolean _patternMatching;
+		private final boolean _deletionRule;
 		private String _path;
 		private Pattern _pattern;
 
@@ -91,6 +97,16 @@ public class FilterRuleList {
 						String.format(
 								"failed to parse filter rule '%s', invalid format: should be '<+|-> <modifier><path-expression>'",
 								plainRule));
+			}
+
+			if ("P".equals(splittedRule[0])) {
+				splittedRule[0] = "-";
+				_deletionRule = true;
+			} else if ("R".equals(splittedRule[0])) {
+				splittedRule[0] = "+";
+				_deletionRule = true;
+			} else {
+				_deletionRule = false;
 			}
 
 			if (!"+".equals(splittedRule[0]) && !"-".equals(splittedRule[0])) {
@@ -198,7 +214,11 @@ public class FilterRuleList {
 		@Override
 		public String toString() {
 			StringBuilder buf = new StringBuilder();
-			buf.append(_inclusion ? "+" : "-").append(" ");
+			if (!_deletionRule) {
+				buf.append(_inclusion ? "+" : "-").append(" ");
+			} else {
+				buf.append(_inclusion ? "R" : "P").append(" ");
+			}
 			buf.append(_negateMatching ? "!" : "");
 			/* if (_patternMatching) {
 				buf.append(_pattern.toString());
