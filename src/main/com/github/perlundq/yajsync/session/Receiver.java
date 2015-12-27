@@ -645,20 +645,17 @@ public class Receiver implements RsyncTask,MessageHandler
 
     private void sendFilterRules() throws InterruptedException
     {
-    	if (_filterRuleConfiguration.getFilterRuleList()._rules.size()>0) {
+		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleListForSending()._rules) {
+			byte[] encodedRule = _characterEncoder.encode(rule.toString());
 
-    		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleList()._rules) {
-    			byte[] encodedRule = _characterEncoder.encode(rule.toString());
+			ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
+			buf.putInt(encodedRule.length);
+			buf.put(encodedRule);
+			buf.flip();
+	        _generator.sendBytes(buf);
+		}
 
-    			ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
-    			buf.putInt(encodedRule.length);
-    			buf.put(encodedRule);
-    			buf.flip();
-    	        _generator.sendBytes(buf);
-    		}
-    	}
-
-    	// send stop signal
+		// send stop signal
     	ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
         buf.putInt(0);
         buf.flip();

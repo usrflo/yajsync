@@ -500,20 +500,17 @@ public class Sender implements RsyncTask,MessageHandler
     {
     	if (!receiverWantsFilterList()) return;
 
-    	if (_filterRuleConfiguration.getFilterRuleList()._rules.size()>0) {
+		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleListForSending()._rules) {
+			byte[] encodedRule = _characterEncoder.encode(rule.toString());
 
-    		for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleList()._rules) {
-    			byte[] encodedRule = _characterEncoder.encode(rule.toString());
+			ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
+			buf.putInt(encodedRule.length);
+			buf.put(encodedRule);
+			buf.flip();
+			_duplexChannel.put(buf);
+		}
 
-    			ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
-    			buf.putInt(encodedRule.length);
-    			buf.put(encodedRule);
-    			buf.flip();
-    			_duplexChannel.put(buf);
-    		}
-    	}
-
-    	// send stop signal
+		// send stop signal
     	ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
         buf.putInt(0);
         buf.flip();
@@ -833,7 +830,6 @@ public class Sender implements RsyncTask,MessageHandler
 
         FilterRuleConfiguration localFilterRuleConfiguration;
 		try {
-			// FSTODO: directory to Path
 			localFilterRuleConfiguration = new FilterRuleConfiguration(parentFilterRuleConfiguration, directory.path());
 		} catch (ArgumentParsingError e) {
             if (_log.isLoggable(Level.WARNING)) {
@@ -885,8 +881,14 @@ public class Sender implements RsyncTask,MessageHandler
                                               pathNameBytes, attrs);    // throws IllegalArgumentException but that cannot happen
 
                     // use filter
-                    if (filterByRules && localFilterRuleConfiguration.exclude(relativePathName, attrs.isDirectory())) {
-                		continue;
+                    if (filterByRules) {
+                    	boolean isDirectory = attrs.isDirectory();
+                    	if (localFilterRuleConfiguration.exclude(relativePathName, isDirectory)) {
+                    		continue;
+                    	}
+                    	if (localFilterRuleConfiguration.hide(relativePathName, isDirectory)) {
+                    		continue;
+                    	}
                     }
 
                     fileset.add(f);

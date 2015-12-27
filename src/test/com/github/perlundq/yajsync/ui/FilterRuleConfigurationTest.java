@@ -202,4 +202,25 @@ public class FilterRuleConfigurationTest {
 						&& dirCfg.protect("test", false)
 						&& dirCfg.risk("test2", false));
 	}
+
+	@Test
+	public void testHiding() throws ArgumentParsingError {
+
+		FilterRuleConfiguration parentCfg = new FilterRuleConfiguration(null,
+				rootDirectory);
+		parentCfg.readRule("merge " + mergeFile);
+		parentCfg.readRule("+ *");
+
+		FilterRuleConfiguration dirCfg = new FilterRuleConfiguration(parentCfg,
+				rootDirectory);
+		dirCfg.readRule("H test");
+
+		assertEquals(
+				true,
+				parentCfg.include("test", false) && dirCfg.include(mergeFile, false)
+						&& !parentCfg.include("def", false)
+						&& parentCfg.include("test", false)
+						&& dirCfg.include("abc", false)
+						&& dirCfg.hide("test", false));
+	}
 }

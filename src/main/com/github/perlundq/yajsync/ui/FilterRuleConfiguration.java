@@ -38,12 +38,17 @@ public class FilterRuleConfiguration {
 	private FilterRuleConfiguration _parentRuleConfiguration = null;
 	// private List<MergeRule> _mergeRuleList = new ArrayList<>();
 	private FilterRuleList _localRuleList = new FilterRuleList();
-	private FilterRuleList _deletionRuleList = new FilterRuleList();
+	private final FilterRuleList _deletionRuleList = new FilterRuleList();
+	private final FilterRuleList _hidingRuleList = new FilterRuleList();
 	private boolean _inheritance = true;
 	private String _dirMergeFilename = null;
 	private String _dirname = null;
 
 	// FSTODO: CustomFileSystem.getConfigPath( ... )
+
+	public enum RuleType {
+		EXCLUSION, DELETION, HIDING
+	}
 
 	public FilterRuleConfiguration(List<String> inputFilterRules) throws ArgumentParsingError {
 		for (String inputFilterRule : inputFilterRules) {
@@ -80,7 +85,9 @@ public class FilterRuleConfiguration {
 		if (splittedRule.length == 1 && (splittedRule[0].startsWith("!") || splittedRule[0].startsWith("clear"))) {
 			// LIST-CLEARING FILTER RULE
 			_localRuleList = new FilterRuleList();
-			_deletionRuleList = new FilterRuleList();
+			// clearing refers to inclusion/exclusion lists only
+			// _deletionRuleList = new FilterRuleList();
+			// _hidingRuleList = new FilterRuleList();
 			_parentRuleConfiguration = null;
 			return;
 		}
@@ -166,6 +173,12 @@ public class FilterRuleConfiguration {
 		} else if (m._risk == true) {
 			_deletionRuleList.addRule("R " + splittedRule[1].trim());
 			return;
+		} else if (m._hide == true) {
+			_hidingRuleList.addRule("H " + splittedRule[1].trim());
+			return;
+		} else if (m._show == true) {
+			_hidingRuleList.addRule("S " + splittedRule[1].trim());
+			return;
 		}
 
 		throw new ArgumentParsingError(String.format("invalid rule %s",
@@ -202,11 +215,26 @@ public class FilterRuleConfiguration {
 		}
 	} */
 
-	public Result check(String filename, boolean isDirectory, boolean isDeletion) {
+	public Result check(String filename, boolean isDirectory, RuleType ruleType) {
 
 		assureDirectoryPathname(filename, isDirectory);
 
-		Result result = !isDeletion ? _localRuleList.check(filename, isDirectory):_deletionRuleList.check(filename, isDirectory);
+		Result result;
+
+		switch(ruleType) {
+		case EXCLUSION:
+			result = _localRuleList.check(filename, isDirectory);
+			break;
+		case DELETION:
+			result = _deletionRuleList.check(filename, isDirectory);
+			break;
+		case HIDING:
+			result = _hidingRuleList.check(filename, isDirectory);
+			break;
+		default:
+			throw new RuntimeException("ruleType "+ruleType+" not implemented");
+		}
+
 		if (result!=Result.NEUTRAL) {
 			return result;
 		}
@@ -216,7 +244,7 @@ public class FilterRuleConfiguration {
 		while (parent.getParentRuleConfiguration() != null) {
 			parent = parent.getParentRuleConfiguration();
 			if (parent.isInheritance()) {
-				result = parent.check(filename, isDirectory, isDeletion);
+				result = parent.check(filename, isDirectory, ruleType);
 				if (result!=Result.NEUTRAL) {
 					return result;
 				}
@@ -227,7 +255,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean include(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, false);
+		Result result = this.check(filename, isDirectory, RuleType.EXCLUSION);
 		if (result==Result.EXCLUDED) {
 			return false;
 		}
@@ -236,7 +264,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean exclude(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, false);
+		Result result = this.check(filename, isDirectory, RuleType.EXCLUSION);
 		if (result==Result.EXCLUDED) {
 			return true;
 		}
@@ -245,7 +273,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean protect(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, true);
+		Result result = this.check(filename, isDirectory, RuleType.DELETION);
 		if (result==Result.EXCLUDED) {
 			return true;
 		}
@@ -254,7 +282,25 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean risk(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, true);
+		Result result = this.check(filename, isDirectory, RuleType.DELETION);
+		if (result==Result.EXCLUDED) {
+			return false;
+		}
+
+		return true;
+	}
+
+	public boolean hide(String filename, boolean isDirectory) {
+		Result result = this.check(filename, isDirectory, RuleType.HIDING);
+		if (result==Result.EXCLUDED) {
+			return true;
+		}
+
+		return false;
+	}
+
+	public boolean show(String filename, boolean isDirectory) {
+		Result result = this.check(filename, isDirectory, RuleType.HIDING);
 		if (result==Result.EXCLUDED) {
 			return false;
 		}
@@ -379,6 +425,28 @@ public class FilterRuleConfiguration {
 				m._risk = true;
 				i += 4;
 				continue;
+			} else if (c == 'H') {
+				// hide
+				m._hide = true;
+				i++;
+				continue;
+			} else if (c == 'h' && i + 4 <= modifier.length()
+					&& "hide".equals(modifier.substring(i, i + 4))) {
+				// hide
+				m._hide = true;
+				i += 4;
+				continue;
+			} else if (c == 'S') {
+				// show
+				m._show = true;
+				i++;
+				continue;
+			} else if (c == 's' && i + 4 <= modifier.length()
+					&& "show".equals(modifier.substring(i, i + 4))) {
+				// show
+				m._show = true;
+				i += 4;
+				continue;
 			}
 
 			throw new ArgumentParsingError(String.format(
@@ -392,12 +460,12 @@ public class FilterRuleConfiguration {
 		this._localRuleList = localRuleList;
 	} */
 
-	public FilterRuleList getFilterRuleList() {
+	public FilterRuleList getFilterRuleListForSending() {
 		return new FilterRuleList().addList(_localRuleList).addList(_deletionRuleList);
 	}
 
 	public boolean isFilterAvailable() {
-		boolean result = _localRuleList._rules.size() > 0 || _deletionRuleList._rules.size() > 0;
+		boolean result = _localRuleList._rules.size() > 0 || _deletionRuleList._rules.size() > 0 || _hidingRuleList._rules.size() > 0;
 		if (!result && _inheritance && _parentRuleConfiguration!=null) {
 			result = _parentRuleConfiguration.isFilterAvailable();
 		}
@@ -413,6 +481,8 @@ public class FilterRuleConfiguration {
 		boolean _dirMerge;
 		boolean _protect;
 		boolean _risk;
+		boolean _hide;
+		boolean _show;
 
 		public void checkValidity(String plainRule) throws ArgumentParsingError {
 			if ((_merge && _dirMerge) || (_include && _exclude) || (_protect && _risk)) {
@@ -443,6 +513,7 @@ public class FilterRuleConfiguration {
 		buf.append("dir=").append(_dirname).append("; ");
 		buf.append("rules=[").append(_localRuleList.toString()).append("]; ");
 		buf.append("deletion_rules=[").append(_deletionRuleList.toString()).append("]; ");
+		buf.append("hiding_rules=[").append(_hidingRuleList.toString()).append("]; ");
 		buf.append("inheritance=").append(new Boolean(_inheritance).toString()).append("; ");
 		if (_dirMergeFilename!=null) {
 			buf.append("dirMergeFilename=").append(_dirMergeFilename).append("; ");

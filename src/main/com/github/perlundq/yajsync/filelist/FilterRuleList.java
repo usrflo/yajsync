@@ -31,7 +31,7 @@ public class FilterRuleList {
 	public List<FilterRule> _rules = new ArrayList<FilterRule>();
 
 	public enum Result {
-		EXCLUDED /* PROTECTED */, INCLUDED /* RISK */ , NEUTRAL
+		EXCLUDED /* PROTECTED, HIDE */, INCLUDED /* RISK, SHOW */ , NEUTRAL
 	}
 
 	public FilterRuleList addList(FilterRuleList list) {
@@ -78,6 +78,7 @@ public class FilterRuleList {
 		private final boolean _negateMatching;
 		private final boolean _patternMatching;
 		private final boolean _deletionRule;
+		private final boolean _hidingRule;
 		private String _path;
 		private Pattern _pattern;
 
@@ -95,7 +96,7 @@ public class FilterRuleList {
 			if (splittedRule.length != 2) {
 				throw new ArgumentParsingError(
 						String.format(
-								"failed to parse filter rule '%s', invalid format: should be '<+|-> <modifier><path-expression>'",
+								"failed to parse filter rule '%s', invalid format: should be '<+|-|P|R|H|S> <modifier><path-expression>'",
 								plainRule));
 			}
 
@@ -107,6 +108,16 @@ public class FilterRuleList {
 				_deletionRule = true;
 			} else {
 				_deletionRule = false;
+			}
+
+			if ("H".equals(splittedRule[0])) {
+				splittedRule[0] = "-";
+				_hidingRule = true;
+			} else if ("S".equals(splittedRule[0])) {
+				splittedRule[0] = "+";
+				_hidingRule = true;
+			} else {
+				_hidingRule = false;
 			}
 
 			if (!"+".equals(splittedRule[0]) && !"-".equals(splittedRule[0])) {
@@ -214,10 +225,12 @@ public class FilterRuleList {
 		@Override
 		public String toString() {
 			StringBuilder buf = new StringBuilder();
-			if (!_deletionRule) {
-				buf.append(_inclusion ? "+" : "-").append(" ");
-			} else {
+			if (_deletionRule) {
 				buf.append(_inclusion ? "R" : "P").append(" ");
+			} else if (_hidingRule) {
+				buf.append(_inclusion ? "S" : "H").append(" ");
+			} else {
+				buf.append(_inclusion ? "+" : "-").append(" ");
 			}
 			buf.append(_negateMatching ? "!" : "");
 			/* if (_patternMatching) {
