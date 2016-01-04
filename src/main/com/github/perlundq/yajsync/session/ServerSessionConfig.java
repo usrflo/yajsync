@@ -375,6 +375,14 @@ public class ServerSessionConfig extends SessionConfig
                 	   setIsDelete(); // implicit option
                 }}));
 
+        argsParser.add(Option.newWithoutArgument(
+                Option.Policy.OPTIONAL,
+                "stats", "", "",
+                new Option.ContinuingHandler() {
+                   @Override public void handleAndContinue(Option option) {
+                	   ; // TODO FS
+                }}));
+
         // FIXME: let ModuleProvider mutate this argsParser instance before
         // calling parse (e.g. adding specific options or removing options)
 
