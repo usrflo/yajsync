@@ -5,6 +5,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,12 +18,15 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.Principal;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
@@ -49,7 +53,7 @@ import com.github.perlundq.yajsync.session.Modules;
 import com.github.perlundq.yajsync.session.RestrictedModule;
 import com.github.perlundq.yajsync.session.RestrictedPath;
 import com.github.perlundq.yajsync.session.Statistics;
-import com.github.perlundq.yajsync.ui.YajSyncClient;
+import com.github.perlundq.yajsync.ui.SyncClient;
 import com.github.perlundq.yajsync.ui.YajSyncServer;
 import com.github.perlundq.yajsync.util.FileOps;
 import com.github.perlundq.yajsync.util.Option;
@@ -367,9 +371,9 @@ class TestModuleProvider extends ModuleProvider
     }
 }
 
-public class SystemTest
+public abstract class SystemTest
 {
-    private static class ReturnStatus
+    protected static class ReturnStatus
     {
         final int rc;
         final Statistics stats;
@@ -381,23 +385,18 @@ public class SystemTest
         }
     }
 
-    private final PrintStream _nullOut =
+    protected final PrintStream _nullOut =
         new PrintStream(new OutputStream() {
             @Override
             public void write(int b) throws IOException { /* nop */};
         }
     );
 
-    private ExecutorService _service;
+    protected ExecutorService _service;
 
-    private YajSyncClient newClient()
-    {
-        return new YajSyncClient().
-            setStandardOut(_nullOut).
-            setStandardErr(_nullOut);
-    }
+    protected abstract SyncClient newClient();
 
-    private YajSyncServer newServer(Modules modules)
+    protected YajSyncServer newServer(Modules modules)
     {
         YajSyncServer server = new YajSyncServer().setStandardOut(_nullOut).
                                                    setStandardErr(_nullOut);
@@ -405,23 +404,13 @@ public class SystemTest
         return server;
     }
 
-    private ReturnStatus fileCopy(Path src, Path dst, String ... args)
-    {
-        YajSyncClient client = newClient();
-        String[] nargs = new String[args.length + 2];
-        int i = 0;
-        for (String arg : args) {
-            nargs[i++] = arg;
-        }
-        nargs[i++] = src.toString();
-        nargs[i++] = dst.toString();
-        int rc = client.start(nargs);
-        return new ReturnStatus(rc, client.statistics());
-    }
+    protected abstract ReturnStatus fileCopy(boolean startServer, Path src, Path dst, String ... args);
+
+    protected abstract ReturnStatus fileCopy(Path src, Path dst, String ... args);
 
     private ReturnStatus recursiveCopyTrailingSlash(Path src, Path dst)
     {
-        YajSyncClient client = newClient();
+        SyncClient client = newClient();
         int rc = client.start(new String[] { "--recursive",
                                              src.toString() + "/",
                                              dst.toString() });
@@ -514,7 +503,7 @@ public class SystemTest
     public void testClientNoArgs()
     {
         int rc = newClient().start(new String[] {});
-        assertTrue(rc == -1);
+        assertTrue(rc == -1 || rc == 1);
     }
 
     @Test
@@ -925,7 +914,7 @@ public class SystemTest
         assertTrue(status.stats.numTransferredFiles() == numFiles);
         assertTrue(status.stats.totalLiteralSize() == fileSize);
         assertTrue(status.stats.totalMatchedSize() == 0);
-        ReturnStatus status2 = fileCopy(src, dst);
+        ReturnStatus status2 = fileCopy(false, src, dst);
         assertTrue(status2.rc == 0);
         assertTrue(FileUtil.isContentIdentical(src, dst));
         assertTrue(status2.stats.numFiles() == numDirs + numFiles);
@@ -953,7 +942,7 @@ public class SystemTest
         assertTrue(status.stats.numTransferredFiles() == numFiles);
         assertTrue(status.stats.totalLiteralSize() == fileSize);
         assertTrue(status.stats.totalMatchedSize() == 0);
-        ReturnStatus status2 = fileCopy(src, dst);
+        ReturnStatus status2 = fileCopy(false, src, dst);
         assertTrue(status2.rc == 0);
         assertTrue(FileUtil.isContentIdentical(src, dst));
         assertTrue(status2.stats.numFiles() == numDirs + numFiles);
@@ -1058,7 +1047,7 @@ public class SystemTest
         };
         _service.submit(serverTask);
         isListeningLatch.await();
-        YajSyncClient client = newClient().setStandardOut(_nullOut);
+        SyncClient client = newClient();
         int rc = client.start(new String[] { "--port=14415", "localhost::" });
         assertTrue(rc == 0);
     }
@@ -1091,11 +1080,32 @@ public class SystemTest
         };
         _service.submit(serverTask);
         isListeningLatch.await();
-        YajSyncClient client = newClient().setStandardOut(_nullOut);
-        System.setIn(new ByteArrayInputStream(authToken.getBytes()));
+        SyncClient client = newClient();
+
+        File passwordFile = File.createTempFile("password-file", ".tmp");
+        try (PrintStream out = new PrintStream(passwordFile)) {
+        	out.print(authToken);
+        }
+
+        Set<PosixFilePermission> perms = new HashSet<PosixFilePermission>();
+        //add owners permission
+        perms.add(PosixFilePermission.OWNER_READ);
+        perms.add(PosixFilePermission.OWNER_WRITE);
+        perms.add(PosixFilePermission.OWNER_EXECUTE);
+        //add group permissions
+        perms.add(PosixFilePermission.GROUP_READ);
+        perms.add(PosixFilePermission.GROUP_WRITE);
+        perms.add(PosixFilePermission.GROUP_EXECUTE);
+
+        Files.setPosixFilePermissions(Paths.get(passwordFile.toURI()), perms);
+
+        passwordFile.deleteOnExit();
+
+        // System.setIn(new ByteArrayInputStream(authToken.getBytes()));
         int rc = client.start(new String[] {
-                "--port=14415", "--password-file=-",
+                "--port=14415", "--password-file="+passwordFile.getAbsolutePath(),
                 "localhost::" + restrictedModuleName });
+
         assertTrue(rc == 0);
     }
 
@@ -1128,7 +1138,7 @@ public class SystemTest
         };
         _service.submit(serverTask);
         isListeningLatch.await();
-        YajSyncClient client = newClient().setStandardOut(_nullOut);
+        SyncClient client = newClient();
         System.setIn(new ByteArrayInputStream((authToken + "fail").getBytes()));
         int rc = client.start(new String[] {
                 "--port=14415", "--password-file=-",

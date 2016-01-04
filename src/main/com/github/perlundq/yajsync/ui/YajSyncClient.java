@@ -63,7 +63,7 @@ import com.github.perlundq.yajsync.util.Option;
 import com.github.perlundq.yajsync.util.PathOps;
 import com.github.perlundq.yajsync.util.Util;
 
-public class YajSyncClient implements ClientSessionConfig.AuthProvider
+public class YajSyncClient implements SyncClient, ClientSessionConfig.AuthProvider
 {
     private enum ArgType { LOCAL, REMOTE }
 
@@ -281,7 +281,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
         return this;
     }
 
-    public Statistics statistics()
+    @Override
+	public Statistics statistics()
     {
         return _statistics;
     }
@@ -685,7 +686,8 @@ public class YajSyncClient implements ClientSessionConfig.AuthProvider
             stats.totalRead());
     }
 
-    public int start(String[] args)
+    @Override
+	public int start(String[] args)
     {
         ArgumentParser argsParser =
             ArgumentParser.newWithUnnamed(getClass().getSimpleName(),
