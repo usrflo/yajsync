@@ -38,7 +38,7 @@ public class SortedList<T> extends LinkedList<T> {
     /**
      * Comparator used to sort the list.
      */
-    private Comparator<? super T> comparator = null;
+    private Comparator<? super T> _comparator = null;
     /**
      * Construct a new instance with the list elements sorted in their
      * {@link java.lang.Comparable} natural ordering.
@@ -51,7 +51,7 @@ public class SortedList<T> extends LinkedList<T> {
      * @param comparator
      */
     public SortedList(Comparator<? super T> comparator) {
-        this.comparator = comparator;
+    	_comparator = comparator;
     }
     /**
      * Add a new entry to the list. The insertion point is calculated using the
@@ -61,7 +61,7 @@ public class SortedList<T> extends LinkedList<T> {
      */
     @Override
     public boolean add(T paramT) {
-        int insertionPoint = Collections.binarySearch(this, paramT, comparator);
+        int insertionPoint = Collections.binarySearch(this, paramT, _comparator);
         super.add((insertionPoint > -1) ? insertionPoint : (-insertionPoint) - 1, paramT);
         return true;
     }
@@ -76,7 +76,7 @@ public class SortedList<T> extends LinkedList<T> {
         boolean result = false;
         if (paramCollection.size() > 4) {
             result = super.addAll(paramCollection);
-            Collections.sort(this, comparator);
+            Collections.sort(this, _comparator);
         }
         else {
             for (T paramT:paramCollection) {
@@ -94,6 +94,6 @@ public class SortedList<T> extends LinkedList<T> {
      * <code>false</code>, otherwise.
      */
     public boolean containsElement(T paramT) {
-        return (Collections.binarySearch(this, paramT, comparator) > -1);
+        return (Collections.binarySearch(this, paramT, _comparator) > -1);
     }
 }

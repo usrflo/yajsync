@@ -173,13 +173,13 @@ public class Sender implements RsyncTask,MessageHandler
         return this;
     }
 
-    public Sender setIsDelete(boolean _isDelete) {
-		this._isDelete = _isDelete;
+    public Sender setIsDelete(boolean isDelete) {
+		_isDelete = isDelete;
 		return this;
 	}
 
-	public Sender setIsDeleteExcluded(boolean _isDeleteExcluded) {
-		this._isDeleteExcluded = _isDeleteExcluded;
+	public Sender setIsDeleteExcluded(boolean isDeleteExcluded) {
+		_isDeleteExcluded = isDeleteExcluded;
 		return this;
 	}
 

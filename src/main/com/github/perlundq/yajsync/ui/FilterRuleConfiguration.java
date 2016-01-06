@@ -35,7 +35,6 @@ import com.github.perlundq.yajsync.util.ArgumentParsingError;
 public class FilterRuleConfiguration {
 
 	private FilterRuleConfiguration _parentRuleConfiguration = null;
-	// private List<MergeRule> _mergeRuleList = new ArrayList<>();
 	private FilterRuleList _localRuleList = new FilterRuleList();
 	private final FilterRuleList _deletionRuleList = new FilterRuleList();
 	private final FilterRuleList _hidingRuleList = new FilterRuleList();
@@ -65,10 +64,6 @@ public class FilterRuleConfiguration {
 			_dirMergeFilename = _parentRuleConfiguration.getDirMergeFilename();
 		}
 		_dirname = directory.toString();
-
-		// directory specific initialization of rules, FSTODO: no inheritance?
-		// _mergeRuleList = parentRuleConfiguration.getMergeRuleList();
-		// readMergeRules();
 
 		if (_dirMergeFilename != null
 				&& (new File(_dirname + "/" + _dirMergeFilename)).exists()) {
@@ -184,36 +179,6 @@ public class FilterRuleConfiguration {
 				plainRule));
 	}
 
-	// FSTODO: korrigieren, dir-merge müsste zur Laufzeit akt. werden, nicht 'merge' ?
-	/* public void readMergeRules() throws ArgumentParsingError {
-
-		for (MergeRule mergeRule : _mergeRuleList) {
-
-			try (BufferedReader br = new BufferedReader(new FileReader(
-					_dirname + "/" + mergeRule._filename))) {
-				String line = br.readLine();
-				while (line != null) {
-					line = line.trim();
-					// ignore empty lines or comments
-					if (line.length() != 0 && !line.startsWith("#")) {
-						if (mergeRule._modifier._exclude == true) {
-							_localRuleList.addRule("- " + line);
-						} else if (mergeRule._modifier._include == true) {
-							_localRuleList.addRule("+ " + line);
-						} else {
-							readRule(line);
-						}
-					}
-					line = br.readLine();
-				}
-			} catch (IOException e) {
-				throw new ArgumentParsingError(String.format(
-						"impossible to parse filter file '%s' for %s",
-						mergeRule._filename, _dirname));
-			}
-		}
-	} */
-
 	public Result check(String filename, boolean isDirectory, RuleType ruleType) {
 
 		assureDirectoryPathname(filename, isDirectory);
@@ -254,7 +219,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean include(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, RuleType.EXCLUSION);
+		Result result = check(filename, isDirectory, RuleType.EXCLUSION);
 		if (result==Result.EXCLUDED) {
 			return false;
 		}
@@ -263,7 +228,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean exclude(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, RuleType.EXCLUSION);
+		Result result = check(filename, isDirectory, RuleType.EXCLUSION);
 		if (result==Result.EXCLUDED) {
 			return true;
 		}
@@ -272,7 +237,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean protect(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, RuleType.DELETION);
+		Result result = check(filename, isDirectory, RuleType.DELETION);
 		if (result==Result.EXCLUDED) {
 			return true;
 		}
@@ -281,7 +246,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean risk(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, RuleType.DELETION);
+		Result result = check(filename, isDirectory, RuleType.DELETION);
 		if (result==Result.EXCLUDED) {
 			return false;
 		}
@@ -290,7 +255,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean hide(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, RuleType.HIDING);
+		Result result = check(filename, isDirectory, RuleType.HIDING);
 		if (result==Result.EXCLUDED) {
 			return true;
 		}
@@ -299,7 +264,7 @@ public class FilterRuleConfiguration {
 	}
 
 	public boolean show(String filename, boolean isDirectory) {
-		Result result = this.check(filename, isDirectory, RuleType.HIDING);
+		Result result = check(filename, isDirectory, RuleType.HIDING);
 		if (result==Result.EXCLUDED) {
 			return false;
 		}
@@ -455,10 +420,6 @@ public class FilterRuleConfiguration {
 		return m;
 	}
 
-	/* public void setFilterRuleList(FilterRuleList localRuleList) {
-		this._localRuleList = localRuleList;
-	} */
-
 	public FilterRuleList getFilterRuleListForSending() {
 		return new FilterRuleList().addList(_localRuleList).addList(_deletionRuleList);
 	}
@@ -493,16 +454,6 @@ public class FilterRuleConfiguration {
 			}
 		}
 	}
-
-	/* private class MergeRule {
-		Modifier _modifier;
-		String _filename;
-
-		public MergeRule(Modifier modifier, String filename) {
-			_modifier = modifier;
-			_filename = filename;
-		}
-	} */
 
 	@Override
 	public String toString() {

@@ -34,7 +34,7 @@ public class FilterRuleList {
 	}
 
 	public FilterRuleList addList(FilterRuleList list) {
-		this._rules.addAll(list._rules);
+		_rules.addAll(list._rules);
 		return this;
 	}
 

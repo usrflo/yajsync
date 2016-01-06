@@ -29,11 +29,11 @@ import com.github.perlundq.yajsync.util.ProcessRunner.Result;
 
 public class RsyncClient implements SyncClient {
 
-	private final String whichCommand = "which";
-	private final String rsyncCommand = "rsync";
-	private String rsyncBinary;
+	private final String _whichCommand = "which";
+	private final String _rsyncCommand = "rsync";
+	private String _rsyncBinary;
 
-	private Statistics statistics;
+	private Statistics _statistics;
 
 	public RsyncClient() {
 		if (!Environment.IS_POSIX_FS) {
@@ -41,9 +41,9 @@ public class RsyncClient implements SyncClient {
 		}
 
 		try {
-			Result whichRsync = ProcessRunner.exec(Arrays.asList(whichCommand, rsyncCommand));
-			if (whichRsync.EXITCODE==0) {
-				rsyncBinary = whichRsync.STDOUT.trim();
+			Result whichRsync = ProcessRunner.exec(Arrays.asList(_whichCommand, _rsyncCommand));
+			if (whichRsync._exitcode==0) {
+				_rsyncBinary = whichRsync._stdout.trim();
 			} else {
 				throw new UnsupportedOperationException("no rsync binary found on this system");
 			}
@@ -56,29 +56,29 @@ public class RsyncClient implements SyncClient {
 	@Override
 	public int start(String[] args) {
 
-		this.statistics = new Statistics();
+		_statistics = new Statistics();
 
 		List<String> command = new ArrayList<String>();
-		command.addAll(Arrays.asList(rsyncBinary, "--protocol="+SessionConfig.VERSION.major(), "--stats"));
+		command.addAll(Arrays.asList(_rsyncBinary, "--protocol="+SessionConfig.VERSION.major(), "--stats"));
 		command.addAll(Arrays.asList(args));
 
 		try {
 			Result rsyncResult = ProcessRunner.exec(command);
-			if (rsyncResult.EXITCODE==0) {
-				this.statistics.setFileListBuildTime(parseStatTime("File list generation time: ", rsyncResult.STDOUT));
-				this.statistics.setFileListTransferTime(parseStatTime("File list transfer time: ", rsyncResult.STDOUT));
-				this.statistics.setNumFiles(parseStatInt("Number of files: ", rsyncResult.STDOUT));
-				this.statistics.setNumTransferredFiles(parseStatInt("Number of regular files transferred: ", rsyncResult.STDOUT));
-				this.statistics.setTotalFileListSize(parseStatInt("File list size: ", rsyncResult.STDOUT));
-				this.statistics.setTotalFileSize(parseStatInt("Total file size: ", rsyncResult.STDOUT));
-				this.statistics.setTotalLiteralSize(parseStatInt("Literal data: ", rsyncResult.STDOUT));
-				this.statistics.setTotalMatchedSize(parseStatInt("Matched data: ", rsyncResult.STDOUT));
-				this.statistics.setTotalRead(parseStatInt("Total bytes received: ", rsyncResult.STDOUT));
-				this.statistics.setTotalTransferredSize(parseStatInt("Total transferred file size: ", rsyncResult.STDOUT));
-				this.statistics.setTotalWritten(parseStatInt("Total bytes sent: ", rsyncResult.STDOUT));
+			if (rsyncResult._exitcode==0) {
+				_statistics.setFileListBuildTime(parseStatTime("File list generation time: ", rsyncResult._stdout));
+				_statistics.setFileListTransferTime(parseStatTime("File list transfer time: ", rsyncResult._stdout));
+				_statistics.setNumFiles(parseStatInt("Number of files: ", rsyncResult._stdout));
+				_statistics.setNumTransferredFiles(parseStatInt("Number of regular files transferred: ", rsyncResult._stdout));
+				_statistics.setTotalFileListSize(parseStatInt("File list size: ", rsyncResult._stdout));
+				_statistics.setTotalFileSize(parseStatInt("Total file size: ", rsyncResult._stdout));
+				_statistics.setTotalLiteralSize(parseStatInt("Literal data: ", rsyncResult._stdout));
+				_statistics.setTotalMatchedSize(parseStatInt("Matched data: ", rsyncResult._stdout));
+				_statistics.setTotalRead(parseStatInt("Total bytes received: ", rsyncResult._stdout));
+				_statistics.setTotalTransferredSize(parseStatInt("Total transferred file size: ", rsyncResult._stdout));
+				_statistics.setTotalWritten(parseStatInt("Total bytes sent: ", rsyncResult._stdout));
 			}
 
-			return rsyncResult.EXITCODE;
+			return rsyncResult._exitcode;
 
 		} catch (IOException e) {
 			throw new IllegalArgumentException(e);
@@ -135,7 +135,7 @@ public class RsyncClient implements SyncClient {
 
 	@Override
 	public Statistics statistics() {
-		return statistics;
+		return _statistics;
 	}
 
 }

@@ -28,8 +28,8 @@ import com.github.perlundq.yajsync.ui.SyncClient;
 
 public class RsyncSystemTest extends SystemTest {
 
-	Path modulePath;
-	Path moduleName;
+	Path _modulePath;
+	Path _moduleName;
 
 	@Override
 	protected SyncClient newClient() {
@@ -45,17 +45,17 @@ public class RsyncSystemTest extends SystemTest {
 	protected ReturnStatus fileCopy(boolean startServer, Path src, Path dst, String ... args)
     {
 
-		this.moduleName = Paths.get("testmodule");
+		_moduleName = Paths.get("testmodule");
 		String dstPath;
 
 		if (Files.isDirectory(dst)) {
 
-			this.modulePath = dst;
+			_modulePath = dst;
 			dstPath = "/";
 
 		} else {
 
-			this.modulePath = dst.getParent();
+			_modulePath = dst.getParent();
 			dstPath = "/"+dst.getFileName();
 		}
 
@@ -67,8 +67,8 @@ public class RsyncSystemTest extends SystemTest {
 	            @Override
 	            public Integer call() throws Exception
 	            {
-	            	Module m = new SimpleModule(RsyncSystemTest.this.moduleName,
-	                		RsyncSystemTest.this.modulePath, "a test module", true, true);
+	            	Module m = new SimpleModule(RsyncSystemTest.this._moduleName,
+	                		RsyncSystemTest.this._modulePath, "a test module", true, true);
 	                int rc = newServer(new TestModules(m)).
 	                        setIsListeningLatch(isListeningLatch).
 	                        start(new String[] { "--port=14415" });
@@ -92,7 +92,7 @@ public class RsyncSystemTest extends SystemTest {
         }
         nargs[i++] = "--port=14415";
         nargs[i++] = src.toString();
-        nargs[i++] = "localhost::"+this.moduleName+dstPath;
+        nargs[i++] = "localhost::"+_moduleName+dstPath;
         int rc = client.start(nargs);
 
         return new ReturnStatus(rc, client.statistics());

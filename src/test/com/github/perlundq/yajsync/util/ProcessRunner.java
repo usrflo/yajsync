@@ -25,39 +25,39 @@ import java.util.List;
 public class ProcessRunner {
 
 	public class Result {
-		public final String STDOUT;
-		public final String STDERR;
-		public final int EXITCODE;
-		private final String command;
+		public final String _stdout;
+		public final String _stderr;
+		public final int _exitcode;
+		private final String _command;
 
 		public Result(String out, String err, int exitcode, String command) {
-			this.STDOUT = out;
-			this.STDERR = err;
-			this.EXITCODE = exitcode;
-			this.command = command;
+			_stdout = out;
+			_stderr = err;
+			_exitcode = exitcode;
+			_command = command;
 		}
 
 		public String getCommand() {
-			return command;
+			return _command;
 		}
 
 		public ProcessException getProcessException() {
-			return new ProcessException("CMD: "+this.command+"; EXITCODE: "+this.EXITCODE+"; STDOUT: "+this.STDOUT+"; STDERR: "+this.STDERR);
+			return new ProcessException("CMD: "+_command+"; EXITCODE: "+_exitcode+"; STDOUT: "+_stdout+"; STDERR: "+_stderr);
 		}
 	}
 
 	public class ProcessException extends IOException {
 
 		private static final long serialVersionUID = 1L;
-		String msg;
+		String _msg;
 
 		ProcessException(String msg) {
-			this.msg = msg;
+			_msg = msg;
 		}
 
 		@Override
 		public String getMessage() {
-			return this.msg;
+			return _msg;
 		}
 	}
 
@@ -91,14 +91,14 @@ public class ProcessRunner {
 
 	class InputStreamTransformer extends Thread {
 
-		private final InputStream m_in;
+		private final InputStream _mIn;
 
-		private final OutputStream m_out;
+		private final OutputStream _mOut;
 
 		public InputStreamTransformer(InputStream in, OutputStream out)
 		{
-			m_in = in;
-			m_out = out;
+			_mIn = in;
+			_mOut = out;
 			start();
 		}
 
@@ -108,9 +108,9 @@ public class ProcessRunner {
 			try
 			{
 				int c;
-				while ((c = m_in.read()) != -1)
+				while ((c = _mIn.read()) != -1)
 				{
-					m_out.write((char) c);
+					_mOut.write((char) c);
 				}
 			} catch (IOException e)
 			{
