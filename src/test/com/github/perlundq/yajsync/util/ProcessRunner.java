@@ -9,28 +9,24 @@ import java.util.List;
 public class ProcessRunner {
 
 	public class Result {
-		public String STDOUT;
-		public String STDERR;
-		public int EXITCODE;
-		private final List<String> commandList;
+		public final String STDOUT;
+		public final String STDERR;
+		public final int EXITCODE;
+		private final String command;
 
-		public Result(String out, String err, int exitcode, List<String> commandList) {
+		public Result(String out, String err, int exitcode, String command) {
 			this.STDOUT = out;
 			this.STDERR = err;
 			this.EXITCODE = exitcode;
-			this.commandList = commandList;
+			this.command = command;
 		}
 
 		public String getCommand() {
-			StringBuilder buf = new StringBuilder();
-			for (String commandPart : commandList) {
-				buf.append(commandPart).append(" ");
-			}
-			return buf.toString().trim();
+			return command;
 		}
 
 		public ProcessException getProcessException() {
-			return new ProcessException("CMD: "+getCommand()+"; EXITCODE: "+this.EXITCODE+"; STDOUT: "+this.STDOUT+"; STDERR: "+this.STDERR);
+			return new ProcessException("CMD: "+this.command+"; EXITCODE: "+this.EXITCODE+"; STDOUT: "+this.STDOUT+"; STDERR: "+this.STDERR);
 		}
 	}
 
@@ -60,8 +56,9 @@ public class ProcessRunner {
 		for (String cmd : commandList) {
 			buf.append(cmd).append(" ");
 		}
+		String command = buf.toString().trim();
 
-		Process process = Runtime.getRuntime().exec(buf.toString());
+		Process process = Runtime.getRuntime().exec(command);
 		InputStreamTransformer stdoutReader = pr.new InputStreamTransformer(process.getInputStream(), stdout);
 		InputStreamTransformer stderrReader = pr.new InputStreamTransformer(process.getErrorStream(), stderr);
 
@@ -73,7 +70,7 @@ public class ProcessRunner {
 			throw new IOException(ie);
 		}
 
-		return pr.new Result(stdout.toString(), stderr.toString(), process.exitValue(), commandList);
+		return pr.new Result(stdout.toString(), stderr.toString(), process.exitValue(), command);
 	}
 
 	class InputStreamTransformer extends Thread {
