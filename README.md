@@ -34,6 +34,18 @@ Currently implemented rsync options:
 
 - Archive mode (-a, --archive)
 
+- Add a file-filtering RULE (-f, --filter)
+
+- Exclude files matching PATTERN (--exclude)
+
+- Read exclude patterns from FILE (--exclude-from)
+
+- Don't exclude files matching PATTERN (--include)
+
+- Read list of source-file names from FILE (--include-from)
+
+- Delete excluded files from dest dirs (--delete-excluded)
+
 - Set I/O read timeout in seconds (--timeout=SECONDS)
 
 - Set daemon connection timeout in seconds (--contimeout=SECONDS)

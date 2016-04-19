@@ -87,6 +87,12 @@ public class Filelist
             }
         }
 
+        // TODO: improve performance on large lists by SortedList
+        public boolean contains(FileInfo fileInfo)
+        {
+            return _files.indexOf(fileInfo) != -1;
+        }
+
         private void clear()
         {
             _directory = null;

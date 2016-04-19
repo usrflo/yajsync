@@ -52,6 +52,7 @@ public class ServerSessionConfig extends SessionConfig
     private final List<Path> _sourceFiles = new LinkedList<>();
     private Path _receiverDestination;
     private boolean _isDelete = false;
+    private boolean _isDeleteExcluded = false;
     private boolean _isIncrementalRecurse = false;
     private boolean _isSender = false;
     private boolean _isPreserveDevices = false;
@@ -323,6 +324,15 @@ public class ServerSessionConfig extends SessionConfig
                 }}));
 
         argsParser.add(Option.newWithoutArgument(
+             Option.Policy.OPTIONAL,
+             "delete-excluded", "", "",
+             new Option.ContinuingHandler() {
+                @Override public void handleAndContinue(Option option) {
+                    setIsDeleteExcluded();
+                    setIsDelete(); // implicit option
+             }}));
+
+        argsParser.add(Option.newWithoutArgument(
             Option.Policy.OPTIONAL,
             "", "D", "",
             new Option.ContinuingHandler() {
@@ -514,6 +524,11 @@ public class ServerSessionConfig extends SessionConfig
         _isDelete = true;
     }
 
+    private void setIsDeleteExcluded()
+    {
+        _isDeleteExcluded = true;
+    }
+
     private void setIsPreserveLinks()
     {
         _isPreserveLinks = true;
@@ -562,6 +577,11 @@ public class ServerSessionConfig extends SessionConfig
     public boolean isDelete()
     {
         return _isDelete;
+    }
+
+    public boolean isDeleteExcluded()
+    {
+        return _isDeleteExcluded;
     }
 
     public boolean isPreserveDevices()

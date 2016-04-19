@@ -1,9 +1,29 @@
+/*
+ * Rsync system tests
+ *
+ * Copyright (C) 2014 - 2016 Per Lundqvist
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package com.github.perlundq.yajsync.test;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,11 +38,14 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.Principal;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
@@ -32,6 +55,7 @@ import java.util.concurrent.Executors;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -50,7 +74,6 @@ import com.github.perlundq.yajsync.session.ModuleProvider;
 import com.github.perlundq.yajsync.session.Modules;
 import com.github.perlundq.yajsync.session.RestrictedModule;
 import com.github.perlundq.yajsync.session.RestrictedPath;
-import com.github.perlundq.yajsync.session.RsyncException;
 import com.github.perlundq.yajsync.session.Statistics;
 import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.ui.YajSyncClient;
@@ -659,6 +682,234 @@ public class SystemTest
     }
 
     @Test
+    public void testClientDirCopyDstDeletion() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 2;
+        long fileSize = FileUtil.du(srcFile1, srcFile2);
+
+        Files.createDirectory(dst);
+        Path dstDir1 = dst.resolve("dir.remove");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1.remove");
+        FileUtil.writeToFiles(10, dstFile1);
+        Path dstFile2 = dst.resolve("file2.remove");
+        FileUtil.writeToFiles(9, dstFile2);
+
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientDirCopyExcluded() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile1);
+
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--exclude=file2");
+
+        Files.deleteIfExists(srcFile2);
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientDirCopyDstDeleteExcluded() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile2);
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir1 = copyOfSrc.resolve("dir");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1");
+        FileUtil.writeToFiles(9, dstFile1);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete-excluded", "--exclude=file1");
+
+        Files.deleteIfExists(srcFile1);
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientDirCopyDstDeleteExcludedAndProtect() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile2);
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir1 = copyOfSrc.resolve("dir");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1");
+        FileUtil.writeToFiles(9, dstFile1);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete-excluded", "--exclude=file1", "--filter='protect file1'");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+
+        assertTrue(Files.exists(dstFile1));
+        Files.deleteIfExists(srcFile1);
+        Files.deleteIfExists(dstFile1);
+
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientDirCopyDstHide() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 1;
+        long fileSize = FileUtil.du(srcFile2);
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir1 = copyOfSrc.resolve("dir");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1");
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--filter=\"hide file1\"");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+
+        assertTrue(Files.notExists(dstFile1));
+        Files.deleteIfExists(srcFile1);
+
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
+    public void testClientDirCopyDstDeleteExcludedAndClearing() throws IOException
+    {
+        Path src = _tempDir.newFolder().toPath();
+        Path dst = Paths.get(src.toString() + ".dst");
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+        int numDirs = 3;
+        int numFiles = 2;
+        long fileSize = FileUtil.du(srcFile1)+FileUtil.du(srcFile2);
+
+        Files.createDirectory(dst);
+        Path copyOfSrc = dst.resolve(src.getFileName());
+        Files.createDirectory(copyOfSrc);
+        Path dstDir1 = copyOfSrc.resolve("dir");
+        Files.createDirectory(dstDir1);
+        Path dstFile1 = dstDir1.resolve("file1");
+        FileUtil.writeToFiles(9, dstFile1);
+
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--ignore-times", "--delete-excluded", "--exclude=file1", "--filter='clear'");
+
+        assertTrue(status.rc == 0);
+        assertTrue(FileUtil.isDirectory(dst));
+        assertTrue(FileUtil.isDirectoriesIdentical(src, copyOfSrc));
+        assertTrue(status.stats.numFiles() == numDirs + numFiles);
+        assertTrue(status.stats.numTransferredFiles() == numFiles);
+        assertTrue(status.stats.totalLiteralSize() == fileSize);
+        assertTrue(status.stats.totalMatchedSize() == 0);
+    }
+
+    @Test
     public void testCopyFileMultipleBlockSize() throws IOException
     {
         Path src = _tempDir.newFile().toPath();
@@ -792,7 +1043,7 @@ public class SystemTest
     @Test
     public void testClientCopyPreserveUid() throws IOException
     {
-        if (!User.JVM_USER.equals(User.ROOT)) {
+        if (!Environment.getUserName().equals("root")) {
             return;
         }
 
@@ -826,7 +1077,7 @@ public class SystemTest
     @Test
     public void testClientCopyPreserveGid() throws IOException
     {
-        if (!User.JVM_USER.equals(User.ROOT)) {
+        if (!Environment.getUserName().equals("root")) {
             return;
         }
 
@@ -894,7 +1145,62 @@ public class SystemTest
     }
 
     @Test(timeout=1000)
-    public void testProtectedServerConnection()
+    public void testProtectedServerConnectionWithPasswordFile()
+            throws InterruptedException, IOException
+    {
+        final CountDownLatch isListeningLatch = new CountDownLatch(1);
+        final String restrictedModuleName = "Restricted";
+        final String authToken = "ëẗÿåäöüﭏ사غ";
+        Callable<Integer> serverTask = new Callable<Integer>() {
+            @Override
+            public Integer call() throws Exception
+            {
+                Path modulePath = _tempDir.newFolder().toPath();
+                Module m = new SimpleModule(restrictedModuleName,
+                                            modulePath,
+                                            "a test module", true, false);
+                RestrictedModule rm = new SimpleRestrictedModule(
+                                                 authToken,
+                                                 m,
+                                                 restrictedModuleName,
+                                                 "a restricted module");
+                int rc = newServer(new TestModules(rm)).
+                        setIsListeningLatch(isListeningLatch).
+                        start(new String[] { "--port=14415" });
+                return rc;
+            }
+        };
+        _service.submit(serverTask);
+        isListeningLatch.await();
+        YajSyncClient client = newClient().setStandardOut(_nullOut);
+
+        File passwordFile = File.createTempFile("password-file", ".tmp");
+        try (PrintStream out = new PrintStream(passwordFile)) {
+            out.print(authToken);
+        }
+
+        Set<PosixFilePermission> perms = new HashSet<PosixFilePermission>();
+        //add owners permission
+        perms.add(PosixFilePermission.OWNER_READ);
+        perms.add(PosixFilePermission.OWNER_WRITE);
+        perms.add(PosixFilePermission.OWNER_EXECUTE);
+        //add group permissions
+        perms.add(PosixFilePermission.GROUP_READ);
+        perms.add(PosixFilePermission.GROUP_WRITE);
+        perms.add(PosixFilePermission.GROUP_EXECUTE);
+
+        Files.setPosixFilePermissions(Paths.get(passwordFile.toURI()), perms);
+
+        passwordFile.deleteOnExit();
+
+        int rc = client.start(new String[] {
+                "--port=14415", "--password-file="+passwordFile.getAbsolutePath(),
+                "localhost::" + restrictedModuleName });
+        assertTrue(rc == 0);
+    }
+
+    @Test(timeout=1000)
+    public void testProtectedServerConnectionWithPasswordAtStdin()
             throws InterruptedException
     {
         final CountDownLatch isListeningLatch = new CountDownLatch(1);
@@ -1094,5 +1400,43 @@ public class SystemTest
                 }
             }
         }
+    }
+
+    @Ignore
+    @Test(timeout=100)
+    public void testClientServerDirCopyDstDeleteExcludedAndProtect() throws InterruptedException, IOException
+    {
+        final CountDownLatch isListeningLatch = new CountDownLatch(1);
+
+        Callable<Integer> serverTask = new Callable<Integer>() {
+            @Override
+            public Integer call() throws Exception
+            {
+                Path modulePath = _tempDir.newFolder().toPath();
+                Module m = new SimpleModule("test", modulePath,
+                                            "a test module", true, false);
+                int rc = newServer(new TestModules(m)).
+                        setIsListeningLatch(isListeningLatch).
+                        start(new String[] { "--port=14415" });
+                return rc;
+            }
+        };
+        _service.submit(serverTask);
+        isListeningLatch.await();
+
+        Path src = _tempDir.newFolder().toPath();
+
+        Path srcDir1 = src.resolve("dir");
+        Path srcDir2 = src.resolve("dir.sub");
+        Path srcFile1 = srcDir1.resolve("file1");
+        Path srcFile2 = srcDir2.resolve("file2");
+        Files.createDirectory(srcDir1);
+        Files.createDirectory(srcDir2);
+        FileUtil.writeToFiles(7, srcFile1);
+        FileUtil.writeToFiles(8, srcFile2);
+
+        YajSyncClient client = newClient().setStandardOut(_nullOut);
+        int rc = client.start(new String[] { "--port=14415", "--recursive", "--delete-excluded", "--exclude=file1", "--filter='protect file1'", srcDir1.toAbsolutePath().toString(), "localhost::test" });
+        assertTrue(rc == 0);
     }
 }

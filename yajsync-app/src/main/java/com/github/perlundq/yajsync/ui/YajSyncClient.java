@@ -353,6 +353,16 @@ public class YajSyncClient
                 }}));
 
         options.add(
+                    Option.newWithoutArgument(Option.Policy.OPTIONAL,
+                                              "delete-excluded", "",
+                                              "also delete excluded files from dest dirs",
+                    new Option.ContinuingHandler() {
+                        @Override public void handleAndContinue(Option option) {
+                            _clientBuilder.isDeleteExcluded(true);
+                            _clientBuilder.isDelete(true); // implicit option
+                        }}));
+
+        options.add(
             Option.newWithoutArgument(Option.Policy.OPTIONAL,
                                       "numeric-ids", "",
                                       "don't map uid/gid values by " +
@@ -435,6 +445,49 @@ public class YajSyncClient
                 @Override public void handleAndContinue(Option option) {
                     _clientBuilder.isDeferWrite(true);
                 }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "filter", "f", "add a file-filtering RULE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) throws ArgumentParsingError {
+                        String str = (String) option.getValue();
+                        String _value = str.replaceAll("^[\"\']|[\"\']$", "");
+                        _clientBuilder.addInputFilterRule(_value);
+                    }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "exclude", "", "exclude files matching PATTERN",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) throws ArgumentParsingError {
+                        _clientBuilder.addInputFilterRule("- " + (String) option.getValue());
+                    }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "exclude-from", "", "read exclude patterns from FILE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) throws ArgumentParsingError {
+                        _clientBuilder.addInputFilterRule("merge,- " + (String) option.getValue());
+                    }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "include", "", "don't exclude files matching PATTERN",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) throws ArgumentParsingError {
+                        _clientBuilder.addInputFilterRule("+ " + (String) option.getValue());
+                    }}));
+
+        options.add(
+                Option.newStringOption(Option.Policy.OPTIONAL,
+                                        "include-from", "", "read list of source-file names from FILE",
+                new Option.ContinuingHandler() {
+                    @Override public void handleAndContinue(Option option) throws ArgumentParsingError {
+                        _clientBuilder.addInputFilterRule("merge,+ " + (String) option.getValue());
+                    }}));
+
 
         options.add(
                 Option.newIntegerOption(Option.Policy.OPTIONAL,

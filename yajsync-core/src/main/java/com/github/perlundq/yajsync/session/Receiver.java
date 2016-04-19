@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -32,6 +33,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HashMap;
@@ -51,6 +53,7 @@ import com.github.perlundq.yajsync.filelist.AbstractPrincipal;
 import com.github.perlundq.yajsync.filelist.DeviceInfo;
 import com.github.perlundq.yajsync.filelist.FileInfo;
 import com.github.perlundq.yajsync.filelist.Filelist;
+import com.github.perlundq.yajsync.filelist.FilterRuleList;
 import com.github.perlundq.yajsync.filelist.Group;
 import com.github.perlundq.yajsync.filelist.RsyncFileAttributes;
 import com.github.perlundq.yajsync.filelist.SymlinkInfo;
@@ -59,11 +62,13 @@ import com.github.perlundq.yajsync.io.AutoDeletable;
 import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.text.TextConversionException;
 import com.github.perlundq.yajsync.text.TextDecoder;
+import com.github.perlundq.yajsync.text.TextEncoder;
+import com.github.perlundq.yajsync.util.ArgumentParsingError;
 import com.github.perlundq.yajsync.util.FileOps;
+import com.github.perlundq.yajsync.util.FilterRuleConfiguration;
 import com.github.perlundq.yajsync.util.MD5;
 import com.github.perlundq.yajsync.util.PathOps;
 import com.github.perlundq.yajsync.util.RuntimeInterruptException;
-import com.github.perlundq.yajsync.util.Util;
 
 public class Receiver implements RsyncTask, MessageHandler
 {
@@ -78,6 +83,7 @@ public class Receiver implements RsyncTask, MessageHandler
         private boolean _isReceiveStatistics;
         private boolean _isSafeFileList = true;
         private FilterMode _filterMode = FilterMode.NONE;
+        private FilterRuleConfiguration _filterRuleConfiguration;
 
         public Builder(Generator generator, ReadableByteChannel in,
                        Path targetPath)
@@ -148,6 +154,11 @@ public class Receiver implements RsyncTask, MessageHandler
             return this;
         }
 
+        public Builder filterRuleConfiguration(FilterRuleConfiguration filterRuleConfiguration) {
+            _filterRuleConfiguration = filterRuleConfiguration;
+            return this;
+        }
+
         public Receiver build()
         {
             return new Receiver(this);
@@ -192,6 +203,12 @@ public class Receiver implements RsyncTask, MessageHandler
         Path relativePathOf(String pathName);
 
         /**
+         * @throws InvalidPathException
+         * @throws RsyncSecurityException
+         */
+        Path relativePathOf(Path fullPath);
+
+        /**
          * @throws RsyncSecurityException
          */
         Path fullPathOf(Path relativePath);
@@ -215,11 +232,15 @@ public class Receiver implements RsyncTask, MessageHandler
     private final boolean _isPreserveUser;
     private final boolean _isPreserveGroup;
     private final boolean _isNumericIds;
+    private final boolean _isDelete;
+    private final boolean _isDeleteExcluded;
+    private final boolean _isDeleteBefore = true;   // default (no delete-during, delete-delay, delete-after implemented)
     private final boolean _isReceiveStatistics;
     private final boolean _isSafeFileList;
     private final FileInfoCache _fileInfoCache = new FileInfoCache();
     private final FileSelection _fileSelection;
     private final FilterMode _filterMode;
+    private FilterRuleConfiguration _filterRuleConfiguration;
     private final Generator _generator;
     private final Map<Integer, User> _uidUserMap = new HashMap<>();
     private final Map<Integer, Group> _gidGroupMap = new HashMap<>();
@@ -227,6 +248,7 @@ public class Receiver implements RsyncTask, MessageHandler
     private final Statistics _stats = new Statistics();
     private final Path _targetPath;
     private final TextDecoder _characterDecoder;
+    private final TextEncoder _characterEncoder;
 
     private int _ioError;
     private PathResolver _pathResolver;
@@ -249,11 +271,15 @@ public class Receiver implements RsyncTask, MessageHandler
         _isPreserveUser = _generator.isPreserveUser();
         _isPreserveGroup = _generator.isPreserveGroup();
         _isNumericIds = _generator.isNumericIds();
+        _isDelete = _generator.isDelete();
+        _isDeleteExcluded = _generator.isDeleteExcluded();
         _fileSelection = _generator.fileSelection();
         _filterMode = builder._filterMode;
+        _filterRuleConfiguration = builder._filterRuleConfiguration;
         _in = new RsyncInChannel(builder._in, this, INPUT_CHANNEL_BUF_SIZE);
         _targetPath = builder._targetPath;
         _characterDecoder = TextDecoder.newStrict(_generator.charset());
+        _characterEncoder = TextEncoder.newStrict(_generator.charset());
     }
 
     @Override
@@ -274,6 +300,8 @@ public class Receiver implements RsyncTask, MessageHandler
                 "isPreserveTimes=%b, " +
                 "isPreserveUser=%b, " +
                 "isPreserveGroup=%b, " +
+                "isDelete=%b, " +
+                "isDeleteExcluded=%b, " +
                 "isReceiveStatistics=%b, " +
                 "isSafeFileList=%b, " +
                 "fileSelection=%s, " +
@@ -294,6 +322,8 @@ public class Receiver implements RsyncTask, MessageHandler
                 _isPreserveTimes,
                 _isPreserveUser,
                 _isPreserveGroup,
+                _isDelete,
+                _isDeleteExcluded,
                 _isReceiveStatistics,
                 _isSafeFileList,
                 _fileSelection,
@@ -322,14 +352,14 @@ public class Receiver implements RsyncTask, MessageHandler
                 _log.fine(this.toString());
             }
             if (_filterMode == FilterMode.SEND) {
-                sendEmptyFilterRules();
+                // send filter rules if client
+                sendFilterRules();
             } else if (_filterMode == FilterMode.RECEIVE) {
-                String rules = receiveFilterRules();
-                if (rules.length() > 0) {
-                    throw new RsyncProtocolException(String.format(
-                            "Received a list of filter rules of length %d " +
-                            "from peer, this is not yet supported (%s)",
-                            rules.length(), rules));
+                // receive filter rules if server
+                try {
+                    _filterRuleConfiguration = new FilterRuleConfiguration(receiveFilterRules());
+                } catch (ArgumentParsingError e) {
+                    throw new RsyncProtocolException(e);
                 }
             }
 
@@ -387,6 +417,10 @@ public class Receiver implements RsyncTask, MessageHandler
             Filelist.SegmentBuilder builder = new Filelist.SegmentBuilder(null);
             ioError |= extractFileMetadata(stubs, builder);
 
+            if (_isDeleteBefore) {
+                _ioError |= deleteUnmatchedFiles(builder, _targetPath);
+            }
+
             Filelist fileList = _generator.fileList();
             Filelist.Segment segment = fileList.newSegment(builder);
             _generator.generateSegment(segment);
@@ -427,18 +461,34 @@ public class Receiver implements RsyncTask, MessageHandler
     /**
      * @throws RsyncProtocolException if failing to decode the filter rules
      */
-    private String receiveFilterRules() throws ChannelException
+    private List<String> receiveFilterRules() throws ChannelException
     {
+        int numBytesToRead;
+        List<String> list = new ArrayList<>();
+
+        if (!receiverWantsFilterList()) {
+            return list;
+        }
+
         try {
-            int numBytesToRead = _in.getInt();
-            ByteBuffer buf = _in.get(numBytesToRead);
-            String filterRules = _characterDecoder.decode(buf);
-            return filterRules;
+
+            while ((numBytesToRead = _in.getInt())>0 ) {
+                ByteBuffer buf = _in.get(numBytesToRead);
+                list.add(_characterDecoder.decode(buf));
+            }
+
+            return list;
+
         } catch (TextConversionException e) {
             throw new RsyncProtocolException(e);
         }
     }
 
+    private boolean receiverWantsFilterList()
+    {
+        // TODO: add parameter -m, --prune-empty-dirs
+        return (/* _isPruneEmptyDirs || */ _isDelete);
+    }
 
     /**
      * @throws RsyncProtocolException if user name is the empty string
@@ -586,6 +636,13 @@ public class Receiver implements RsyncTask, MessageHandler
                         FileSystem fs = _targetPath.getFileSystem();
                         return fs.getPath(stubs.get(0)._pathName);
                     }
+                    @Override public Path relativePathOf(Path fullPath) {
+                        Path relativePath = _targetPath.relativize(fullPath);
+                        if (!relativePath.equals(Text.EMPTY)) {
+                            return relativePath.normalize();
+                        }
+                        return relativePath;
+                    }
                     @Override public Path fullPathOf(Path relativePath) {
                         return _targetPath;
                     }
@@ -615,6 +672,17 @@ public class Receiver implements RsyncTask, MessageHandler
                         Path normalizedRelativePath =
                             PathOps.normalizeStrict(relativePath);
                         return normalizedRelativePath;
+                    }
+                    @Override public Path relativePathOf(Path fullPath) {
+                        try {
+                            Path relativePath = _targetPath.relativize(fullPath);
+                            if (!relativePath.equals(Text.EMPTY)) {
+                                return relativePath.normalize();
+                            }
+                            return relativePath;
+                        } catch (Exception e) {
+                            throw new RsyncSecurityException(_targetPath + " vs. " + fullPath);
+                        }
                     }
                     @Override public Path fullPathOf(Path relativePath) {
                         Path fullPath =
@@ -675,8 +743,19 @@ public class Receiver implements RsyncTask, MessageHandler
         _stats.setTotalWritten(totalWritten);
     }
 
-    private void sendEmptyFilterRules() throws InterruptedException
+    private void sendFilterRules() throws InterruptedException
     {
+        for (FilterRuleList.FilterRule rule : _filterRuleConfiguration.getFilterRuleListForSending()._rules) {
+            byte[] encodedRule = _characterEncoder.encode(rule.toString());
+
+            ByteBuffer buf = ByteBuffer.allocate(4 + encodedRule.length).order(ByteOrder.LITTLE_ENDIAN);
+            buf.putInt(encodedRule.length);
+            buf.put(encodedRule);
+            buf.flip();
+            _generator.sendBytes(buf);
+        }
+
+        // send stop signal
         ByteBuffer buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
         buf.putInt(0);
         buf.flip();
@@ -860,6 +939,11 @@ public class Receiver implements RsyncTask, MessageHandler
                 Filelist.SegmentBuilder builder =
                     new Filelist.SegmentBuilder(directory);
                 ioError |= extractFileMetadata(stubs, builder);
+
+                if (_isDeleteBefore) {
+                    _ioError |= deleteUnmatchedFiles(builder, directory.pathOrNull());
+                }
+
                 segment = fileList.newSegment(builder);
                 _generator.generateSegment(segment);
                 numSegmentsInProgress++;
@@ -1931,6 +2015,85 @@ public class Receiver implements RsyncTask, MessageHandler
         } catch (ChannelEOFException e) {
             // It's OK, we expect EOF without having received any data
         }
+    }
+
+    public int deleteUnmatchedFiles(Filelist.SegmentBuilder builder, Path basePath) {
+
+        int ioError = 0;
+
+        if ((!_isDelete && !_isDeleteExcluded) || !Files.isDirectory(basePath) || !Files.exists(basePath)) {
+            return ioError;
+        }
+
+        if (_log.isLoggable(Level.FINE)) {
+            _log.fine(String.format("delete unmatched files in dir %s", basePath));
+        }
+
+        if (_ioError!=0 /* & IOERR_GENERAL && !ignore_errors */) {  // TODO
+//          if (already_warned)
+//              return;
+//          rprintf(FINFO,
+//              "IO error encountered -- skipping file deletion\n");
+//          already_warned = 1;
+            return ioError;
+        }
+
+        try {
+
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(basePath)) {
+                for (Path entry : stream) {
+                    deleteUnmatchedFile(builder, entry, basePath);
+                }
+            }
+
+        } catch (IOException e) {
+            if (_log.isLoggable(Level.WARNING)) {
+                _log.warning(String.format("Got I/O error during deletion of unmatched files " +
+                                           "of %s: %s",
+                                           basePath, e.getMessage()));
+            }
+            ioError = IoError.GENERAL;
+        }
+
+        return ioError;
+    }
+
+    private boolean deleteUnmatchedFile(Filelist.SegmentBuilder builder, Path entry, Path basePath) throws IOException {
+
+        Path relativePath = _pathResolver.relativePathOf(entry);
+        if (relativePath.equals(Text.EMPTY)) {
+            // don't delete the relative root directory
+            return false;
+        }
+
+        String relativePathName = Text.withSlashAsPathSepator(relativePath);
+        byte[] pathNameBytes = _characterEncoder.encodeOrNull(relativePathName);
+        if (pathNameBytes != null) {
+            FileInfo fileInfo = new FileInfo(entry, relativePath,
+                                       pathNameBytes, RsyncFileAttributes.stat(entry));
+
+            boolean isDirectory = Files.isDirectory(entry);
+            String filename = "./"+relativePathName;
+
+            // detect protection
+            if (_filterRuleConfiguration.protect(filename, isDirectory)) {
+                return false;
+            }
+
+            // detect exclusion, TODO: check path conversion
+            boolean isEntryExcluded = _filterRuleConfiguration.exclude(filename, isDirectory);
+
+            if (!isEntryExcluded && _isDelete && !builder.contains(fileInfo)) {
+                PathOps.deleteIfExists(fileInfo.pathOrNull(), basePath);
+                return true;
+            }
+            else if (isEntryExcluded && _isDeleteExcluded) {
+                PathOps.deleteIfExists(fileInfo.pathOrNull(), basePath);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void setIsTransferred(int index)

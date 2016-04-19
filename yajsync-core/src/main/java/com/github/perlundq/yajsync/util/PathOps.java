@@ -24,8 +24,12 @@ import java.net.URISyntaxException;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystemNotFoundException;
 import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -196,5 +200,33 @@ public final class PathOps
             Map<String, Object> empty = Collections.emptyMap();
             return FileSystems.newFileSystem(uri, empty);
         }
+    }
+
+    public static void deleteIfExists(Path path, Path basePath) throws IOException {
+
+        if (!Files.exists(path)) {
+            return;
+        }
+
+        assert Text.EMPTY.equals(basePath) || path.normalize().startsWith(basePath);
+
+        if (Files.isDirectory(path)) {
+            Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+                   @Override
+                   public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                       Files.delete(file);
+                       return FileVisitResult.CONTINUE;
+                   }
+
+                   @Override
+                   public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                       Files.delete(dir);
+                       return FileVisitResult.CONTINUE;
+                   }
+
+            });
+        }
+
+        Files.deleteIfExists(path);
     }
 }

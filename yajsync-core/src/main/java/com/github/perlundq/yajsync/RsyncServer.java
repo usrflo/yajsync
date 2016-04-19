@@ -126,6 +126,7 @@ public class RsyncServer
                     charset(cfg.charset()).
                     fileSelection(cfg.fileSelection()).
                     isDelete(cfg.isDelete()).
+                    isDelete(cfg.isDeleteExcluded()).
                     isPreserveDevices(cfg.isPreserveDevices()).
                     isPreserveSpecials(cfg.isPreserveSpecials()).
                     isPreserveLinks(cfg.isPreserveLinks()).

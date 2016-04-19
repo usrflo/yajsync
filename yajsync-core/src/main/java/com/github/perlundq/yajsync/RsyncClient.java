@@ -38,7 +38,6 @@ import java.util.concurrent.Future;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import com.github.perlundq.yajsync.channels.ChannelException;
 import com.github.perlundq.yajsync.filelist.FileInfo;
 import com.github.perlundq.yajsync.session.ClientSessionConfig;
 import com.github.perlundq.yajsync.session.ClientSessionConfig.AuthProvider;
@@ -52,8 +51,10 @@ import com.github.perlundq.yajsync.session.Sender;
 import com.github.perlundq.yajsync.session.SessionStatus;
 import com.github.perlundq.yajsync.session.Statistics;
 import com.github.perlundq.yajsync.text.Text;
+import com.github.perlundq.yajsync.util.ArgumentParsingError;
 import com.github.perlundq.yajsync.util.BitOps;
 import com.github.perlundq.yajsync.util.Environment;
+import com.github.perlundq.yajsync.util.FilterRuleConfiguration;
 import com.github.perlundq.yajsync.util.RuntimeInterruptException;
 import com.github.perlundq.yajsync.util.Util;
 
@@ -160,7 +161,9 @@ public final class RsyncClient
                                                                     cfg.checksumSeed()).
                                 charset(cfg.charset()).
                                 fileSelection(fileSelection).
+                                filterRuleConfiguration(_filterRuleConfiguration).
                                 isDelete(_isDelete).
+                                isDeleteExcluded(_isDeleteExcluded).
                                 isPreserveDevices(_isPreserveDevices).
                                 isPreserveSpecials(_isPreserveSpecials).
                                 isPreserveLinks(_isPreserveLinks).
@@ -179,6 +182,7 @@ public final class RsyncClient
                                                                  in,
                                                                  _cwd).
                                 filterMode(FilterMode.SEND).
+                                filterRuleConfiguration(_filterRuleConfiguration).
                                 isDeferWrite(_isDeferWrite).
                                 isExitAfterEOF(true).
                                 isExitEarlyIfEmptyList(true).
@@ -348,6 +352,9 @@ public final class RsyncClient
                                                seed).
                     isExitEarlyIfEmptyList(true).
                     charset(_charset).
+                    filterMode(_isDelete ? FilterMode.SEND
+                            : FilterMode.NONE).
+                    filterRuleConfiguration(_filterRuleConfiguration).
                     isPreserveDevices(_isPreserveDevices).
                     isPreserveSpecials(_isPreserveSpecials).
                     isPreserveLinks(_isPreserveLinks).
@@ -358,7 +365,9 @@ public final class RsyncClient
             Generator generator = new Generator.Builder(toSender.sink(), seed).
                     charset(_charset).
                     fileSelection(fileSelection).
+                    filterRuleConfiguration(_filterRuleConfiguration).
                     isDelete(_isDelete).
+                    isDeleteExcluded(_isDeleteExcluded).
                     isPreserveDevices(_isPreserveDevices).
                     isPreserveSpecials(_isPreserveSpecials).
                     isPreserveLinks(_isPreserveLinks).
@@ -373,6 +382,8 @@ public final class RsyncClient
             Receiver receiver = new Receiver.Builder(generator,
                                                      toReceiver.source(),
                                                      _cwd).
+                    filterMode(FilterMode.NONE).
+                    filterRuleConfiguration(_filterRuleConfiguration).
                     isExitEarlyIfEmptyList(true).
                     isDeferWrite(_isDeferWrite).build();
 
@@ -402,6 +413,9 @@ public final class RsyncClient
                                                seed).
                     isExitEarlyIfEmptyList(true).
                     charset(_charset).
+                    filterMode(_isDelete ? FilterMode.SEND
+                            : FilterMode.NONE).
+                    filterRuleConfiguration(_filterRuleConfiguration).
                     isPreserveDevices(_isPreserveDevices).
                     isPreserveSpecials(_isPreserveSpecials).
                     isPreserveLinks(_isPreserveLinks).
@@ -412,7 +426,9 @@ public final class RsyncClient
             Generator generator = new Generator.Builder(toSender.sink(), seed).
                     charset(_charset).
                     fileSelection(fileSelection).
+                    filterRuleConfiguration(_filterRuleConfiguration).
                     isDelete(_isDelete).
+                    isDeleteExcluded(_isDeleteExcluded).
                     isPreserveDevices(_isPreserveDevices).
                     isPreserveSpecials(_isPreserveSpecials).
                     isPreserveLinks(_isPreserveLinks).
@@ -427,6 +443,8 @@ public final class RsyncClient
             Receiver receiver = new Receiver.Builder(generator,
                                                      toReceiver.source(),
                                                      dstPath).
+                    filterMode(FilterMode.NONE).
+                    filterRuleConfiguration(_filterRuleConfiguration).
                     isExitEarlyIfEmptyList(true).
                     isDeferWrite(_isDeferWrite).build();
             try {
@@ -602,13 +620,16 @@ public final class RsyncClient
                                                              cfg.checksumSeed()).
                             filterMode(_isDelete ? FilterMode.SEND
                                                  : FilterMode.NONE).
+                            filterRuleConfiguration(_filterRuleConfiguration).
+                            isDelete(_isDelete).
+                            isDeleteExcluded(_isDeleteExcluded).
                             charset(_charset).
                             fileSelection(fileSelection).
                             isPreserveLinks(_isPreserveLinks).
                             isPreserveUser(_isPreserveUser).
                             isPreserveGroup(_isPreserveGroup).
-                            isNumericIds(_isNumericIds).
                             isInterruptible(_isInterruptible).
+                            isNumericIds(_isNumericIds).
                             isSafeFileList(cfg.isSafeFileList()).build();
                     boolean isOK = _rsyncTaskExecutor.exec(sender);
                     return new Result(isOK, sender.statistics());
@@ -685,7 +706,9 @@ public final class RsyncClient
                                                                 cfg.checksumSeed()).
                             charset(cfg.charset()).
                             fileSelection(fileSelection).
+                            filterRuleConfiguration(_filterRuleConfiguration).
                             isDelete(_isDelete).
+                            isDeleteExcluded(_isDeleteExcluded).
                             isPreserveLinks(_isPreserveLinks).
                             isPreservePermissions(_isPreservePermissions).
                             isPreserveTimes(_isPreserveTimes).
@@ -698,6 +721,7 @@ public final class RsyncClient
                     Receiver receiver = new Receiver.Builder(generator, _in,
                                                              dstPath).
                             filterMode(FilterMode.SEND).
+                            filterRuleConfiguration(_filterRuleConfiguration).
                             isDeferWrite(_isDeferWrite).
                             isExitAfterEOF(true).
                             isExitEarlyIfEmptyList(true).
@@ -785,6 +809,9 @@ public final class RsyncClient
             if (_isDelete && mode == Mode.REMOTE_SEND) {
                 serverArgs.add("--delete");
             }
+            if (_isDeleteExcluded && mode == Mode.REMOTE_SEND) {
+                serverArgs.add("--delete-excluded");
+            }
             if (_isNumericIds) {
                 serverArgs.add("--numeric-ids");
             }
@@ -842,6 +869,7 @@ public final class RsyncClient
         private boolean _isAlwaysItemize;
         private boolean _isDeferWrite;
         private boolean _isDelete;
+        private boolean _isDeleteExcluded;
         private boolean _isIgnoreTimes;
         private boolean _isPreserveDevices;
         private boolean _isPreserveSpecials;
@@ -851,6 +879,7 @@ public final class RsyncClient
         private boolean _isNumericIds;
         private boolean _isPreservePermissions;
         private boolean _isPreserveTimes;
+        private final FilterRuleConfiguration _filterRuleConfiguration = new FilterRuleConfiguration();
         private Charset _charset = Charset.forName(Text.UTF8_NAME);
         private ExecutorService _executorService;
         private FileSelection _fileSelection;
@@ -890,6 +919,12 @@ public final class RsyncClient
         public Builder isDelete(boolean isDelete)
         {
             _isDelete = isDelete;
+            return this;
+        }
+
+        public Builder isDeleteExcluded(boolean isDeleteExcluded)
+        {
+            _isDeleteExcluded = isDeleteExcluded;
             return this;
         }
 
@@ -947,6 +982,11 @@ public final class RsyncClient
             return this;
         }
 
+        public Builder addInputFilterRule(String filterRule) throws ArgumentParsingError {
+            _filterRuleConfiguration.readRule(filterRule);
+            return this;
+        }
+
         /**
          *
          * @throws UnsupportedCharsetException if charset is not supported
@@ -991,6 +1031,7 @@ public final class RsyncClient
     private final boolean _isAlwaysItemize;
     private final boolean _isDeferWrite;
     private final boolean _isDelete;
+    private final boolean _isDeleteExcluded;
     private final boolean _isIgnoreTimes;
     private final boolean _isOwnerOfExecutorService;
     private final boolean _isPreserveDevices;
@@ -1001,6 +1042,7 @@ public final class RsyncClient
     private final boolean _isNumericIds;
     private final boolean _isPreservePermissions;
     private final boolean _isPreserveTimes;
+    private final FilterRuleConfiguration _filterRuleConfiguration;
     private final Charset _charset;
     private final ExecutorService _executorService;
     private final FileSelection _fileSelectionOrNull;
@@ -1015,6 +1057,7 @@ public final class RsyncClient
         _isAlwaysItemize = builder._isAlwaysItemize;
         _isDeferWrite = builder._isDeferWrite;
         _isDelete = builder._isDelete;
+        _isDeleteExcluded = builder._isDeleteExcluded;
         _isIgnoreTimes = builder._isIgnoreTimes;
         _isPreserveDevices = builder._isPreserveDevices;
         _isPreserveSpecials = builder._isPreserveSpecials;
@@ -1024,6 +1067,7 @@ public final class RsyncClient
         _isNumericIds = builder._isNumericIds;
         _isPreservePermissions = builder._isPreservePermissions;
         _isPreserveTimes = builder._isPreserveTimes;
+        _filterRuleConfiguration = builder._filterRuleConfiguration;
         _charset = builder._charset;
         if (builder._executorService == null) {
             _executorService = Executors.newCachedThreadPool();

@@ -66,6 +66,7 @@ import com.github.perlundq.yajsync.text.Text;
 import com.github.perlundq.yajsync.text.TextConversionException;
 import com.github.perlundq.yajsync.text.TextEncoder;
 import com.github.perlundq.yajsync.util.FileOps;
+import com.github.perlundq.yajsync.util.FilterRuleConfiguration;
 import com.github.perlundq.yajsync.util.MD5;
 import com.github.perlundq.yajsync.util.Pair;
 import com.github.perlundq.yajsync.util.Rolling;
@@ -82,6 +83,7 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
         private boolean _isIgnoreTimes;
         private boolean _isInterruptible = true;
         private boolean _isDelete;
+        private boolean _isDeleteExcluded;
         private boolean _isListOnly;
         private boolean _isPreserveDevices;
         private boolean _isPreserveLinks;
@@ -92,6 +94,7 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
         private boolean _isPreserveGroup;
         private boolean _isNumericIds;
         private Charset _charset;
+        private FilterRuleConfiguration _filterRuleConfiguration;
         private FileSelection _fileSelection = FileSelection.EXACT;
 
         public Builder(WritableByteChannel out, byte[] checksumSeed)
@@ -111,6 +114,12 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
         public Builder isDelete(boolean isDelete)
         {
             _isDelete = isDelete;
+            return this;
+        }
+
+        public Builder isDeleteExcluded(boolean isDeleteExcluded)
+        {
+            _isDeleteExcluded = isDeleteExcluded;
             return this;
         }
 
@@ -187,6 +196,11 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
             return this;
         }
 
+        public Builder filterRuleConfiguration(FilterRuleConfiguration filterRuleConfiguration) {
+            _filterRuleConfiguration = filterRuleConfiguration;
+            return this;
+        }
+
         public Builder fileSelection(FileSelection fileSelection)
         {
             assert fileSelection != null;
@@ -214,6 +228,7 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
     private final BitSet _pruned = new BitSet();
     private final boolean _isAlwaysItemize;
     private final boolean _isDelete;
+    private final boolean _isDeleteExcluded;
     private final boolean _isIgnoreTimes;
     private final boolean _isInterruptible;
     private final boolean _isListOnly;
@@ -260,7 +275,9 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
         _characterEncoder = TextEncoder.newStrict(builder._charset);
         _isAlwaysItemize = builder._isAlwaysItemize;
         _isDelete = builder._isDelete;
-        _isDeletionsEnabled = _fileSelection != FileSelection.EXACT;
+        _isDeleteExcluded = builder._isDeleteExcluded;
+        _isDeletionsEnabled = _fileSelection != FileSelection.EXACT && !builder._filterRuleConfiguration.isFilterAvailable();
+        _isDeletionsEnabled = false;
         _isIgnoreTimes = builder._isIgnoreTimes;
         _isInterruptible = builder._isInterruptible;
         _isListOnly = builder._isListOnly;
@@ -281,6 +298,7 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
                 "%s(" +
                 "isAlwaysItemize=%b, " +
                 "isDelete=%b, " +
+                "isDeleteExcluded=%b, " +
                 "isIgnoreTimes=%b, " +
                 "isInterruptible=%b, " +
                 "isListOnly=%b, " +
@@ -298,6 +316,7 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
                 getClass().getSimpleName(),
                 _isAlwaysItemize,
                 _isDelete,
+                _isDeleteExcluded,
                 _isIgnoreTimes,
                 _isInterruptible,
                 _isListOnly,
@@ -323,6 +342,16 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
     public void closeChannel() throws ChannelException
     {
         _out.close();
+    }
+
+    public boolean isDelete()
+    {
+        return _isDelete;
+    }
+
+    public boolean isDeleteExcluded()
+    {
+        return _isDeleteExcluded;
     }
 
     public boolean isListOnly()
