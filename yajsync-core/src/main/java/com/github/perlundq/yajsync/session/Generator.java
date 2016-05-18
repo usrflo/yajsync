@@ -276,8 +276,8 @@ public class Generator implements RsyncTask, Iterable<FileInfo>
         _isAlwaysItemize = builder._isAlwaysItemize;
         _isDelete = builder._isDelete;
         _isDeleteExcluded = builder._isDeleteExcluded;
-        _isDeletionsEnabled = _fileSelection != FileSelection.EXACT && !builder._filterRuleConfiguration.isFilterAvailable();
-        _isDeletionsEnabled = false;
+        _isDeletionsEnabled = _fileSelection != FileSelection.EXACT && (builder._filterRuleConfiguration==null || !builder._filterRuleConfiguration.isFilterAvailable());
+        // _isDeletionsEnabled = false;
         _isIgnoreTimes = builder._isIgnoreTimes;
         _isInterruptible = builder._isInterruptible;
         _isListOnly = builder._isListOnly;

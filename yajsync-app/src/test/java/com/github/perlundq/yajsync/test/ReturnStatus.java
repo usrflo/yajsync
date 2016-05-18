@@ -1,0 +1,31 @@
+/*
+ * Copyright (C) 2016 Florian Sager
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+package com.github.perlundq.yajsync.test;
+
+import com.github.perlundq.yajsync.session.Statistics;
+
+public class ReturnStatus
+{
+    final int rc;
+    final Statistics stats;
+
+    ReturnStatus(int rc_, Statistics stats_)
+    {
+        rc = rc_;
+        stats = stats_;
+    }
+}

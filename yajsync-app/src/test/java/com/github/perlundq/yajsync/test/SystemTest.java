@@ -33,6 +33,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.SocketTimeoutException;
 import java.nio.file.DirectoryStream;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -40,6 +41,7 @@ import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.Principal;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -59,6 +61,10 @@ import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.Parameters;
 
 import com.github.perlundq.yajsync.RsyncClient;
 import com.github.perlundq.yajsync.channels.ChannelException;
@@ -74,9 +80,8 @@ import com.github.perlundq.yajsync.session.ModuleProvider;
 import com.github.perlundq.yajsync.session.Modules;
 import com.github.perlundq.yajsync.session.RestrictedModule;
 import com.github.perlundq.yajsync.session.RestrictedPath;
-import com.github.perlundq.yajsync.session.Statistics;
 import com.github.perlundq.yajsync.text.Text;
-import com.github.perlundq.yajsync.ui.YajSyncClient;
+import com.github.perlundq.yajsync.ui.SyncClient;
 import com.github.perlundq.yajsync.ui.YajSyncServer;
 import com.github.perlundq.yajsync.util.Environment;
 import com.github.perlundq.yajsync.util.FileOps;
@@ -381,19 +386,20 @@ class TestModuleProvider extends ModuleProvider
     }
 }
 
+@RunWith(Parameterized.class)
 public class SystemTest
 {
-    private static class ReturnStatus
-    {
-        final int rc;
-        final Statistics stats;
+    private static final boolean IS_POSIX_FS = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
-        ReturnStatus(int rc_, Statistics stats_)
-        {
-            rc = rc_;
-            stats = stats_;
-        }
+    @Parameters
+    public static Collection<ClientTestFactory> data() {
+        return Arrays.asList(new ClientTestFactory[] {
+                new YajSyncTestFactory(), new NativeRsyncTestFactory()
+        });
     }
+
+    @Parameter // first data value (0) is default
+    public ClientTestFactory testFactory;
 
     private final PrintStream _nullOut =
         new PrintStream(new OutputStream() {
@@ -403,13 +409,6 @@ public class SystemTest
     );
 
     private ExecutorService _service;
-
-    private YajSyncClient newClient()
-    {
-        return new YajSyncClient().
-            setStandardOut(_nullOut).
-            setStandardErr(_nullOut);
-    }
 
     private YajSyncServer newServer(Modules modules)
     {
@@ -421,7 +420,7 @@ public class SystemTest
 
     private ReturnStatus listFiles(Path src, String ... args)
     {
-        YajSyncClient client = newClient();
+        SyncClient client = testFactory.newClient();
         String[] nargs = new String[args.length + 1];
         int i = 0;
         for (String arg : args) {
@@ -434,21 +433,17 @@ public class SystemTest
 
     private ReturnStatus fileCopy(Path src, Path dst, String ... args)
     {
-        YajSyncClient client = newClient();
-        String[] nargs = new String[args.length + 2];
-        int i = 0;
-        for (String arg : args) {
-            nargs[i++] = arg;
-        }
-        nargs[i++] = src.toString();
-        nargs[i++] = dst.toString();
-        int rc = client.start(nargs);
-        return new ReturnStatus(rc, client.statistics());
+        return testFactory.fileCopy(_service, src, dst, args);
+    }
+
+    private ReturnStatus fileCopy(boolean startServer, Path src, Path dst, String ... args)
+    {
+        return testFactory.fileCopy(startServer, _service, src, dst, args);
     }
 
     private ReturnStatus recursiveCopyTrailingSlash(Path src, Path dst)
     {
-        YajSyncClient client = newClient();
+        SyncClient client = testFactory.newClient();
         int rc = client.start(new String[] { "--recursive",
                                              src.toString() + "/",
                                              dst.toString() });
@@ -540,20 +535,25 @@ public class SystemTest
     @Test
     public void testClientNoArgs()
     {
-        int rc = newClient().start(new String[] {});
-        assertTrue(rc == -1);
+        int rc = testFactory.newClient().start(new String[] {});
+        assertTrue(rc == -1 || rc == 1);
     }
 
     @Test
     public void testClientHelp()
     {
-        int rc = newClient().start(new String[] { "--help" });
+        int rc = testFactory.newClient().start(new String[] { "--help" });
         assertTrue(rc == 0);
     }
 
     @Test
     public void testLocalListDotDirEmpty() throws IOException
     {
+        if (testFactory instanceof NativeRsyncTestFactory) {
+            // don't test remote execution by native rsync
+            return;
+        }
+
         Path src = _tempDir.newFolder().toPath();
         ReturnStatus status = listFiles(Paths.get("."), "--cwd=" + src);
         int numFiles = 1;
@@ -569,6 +569,11 @@ public class SystemTest
     @Test
     public void testLocalListDotDir() throws IOException
     {
+        if (testFactory instanceof NativeRsyncTestFactory) {
+            // don't test remote execution by native rsync
+            return;
+        }
+
         Path dir = _tempDir.newFolder("dir").toPath();
         Files.createFile(dir.resolve("file"));
         ReturnStatus status = listFiles(Paths.get("."), "--cwd=" + dir);
@@ -816,7 +821,7 @@ public class SystemTest
         Path dstFile1 = dstDir1.resolve("file1");
         FileUtil.writeToFiles(9, dstFile1);
 
-        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete-excluded", "--exclude=file1", "--filter='protect file1'");
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--delete-excluded", "--exclude=file1", "--filter=protect file1");
 
         assertTrue(status.rc == 0);
         assertTrue(FileUtil.isDirectory(dst));
@@ -857,7 +862,7 @@ public class SystemTest
         Files.createDirectory(dstDir1);
         Path dstFile1 = dstDir1.resolve("file1");
 
-        ReturnStatus status = fileCopy(src, dst, "--recursive", "--filter=\"hide file1\"");
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--filter=hide file1");
 
         assertTrue(status.rc == 0);
         assertTrue(FileUtil.isDirectory(dst));
@@ -898,7 +903,8 @@ public class SystemTest
         Path dstFile1 = dstDir1.resolve("file1");
         FileUtil.writeToFiles(9, dstFile1);
 
-        ReturnStatus status = fileCopy(src, dst, "--recursive", "--ignore-times", "--delete-excluded", "--exclude=file1", "--filter='clear'");
+        // ReturnStatus status = fileCopy(src, dst, "--recursive", "--ignore-times", "--delete-excluded", "--exclude=file1", "--filter=\"clear\"");
+        ReturnStatus status = fileCopy(src, dst, "--recursive", "--ignore-times", "--delete-excluded", "--exclude=file1", "--filter=clear");
 
         assertTrue(status.rc == 0);
         assertTrue(FileUtil.isDirectory(dst));
@@ -1003,7 +1009,7 @@ public class SystemTest
         assertTrue(status.stats.numTransferredFiles() == numFiles);
         assertTrue(status.stats.totalLiteralSize() == fileSize);
         assertTrue(status.stats.totalMatchedSize() == 0);
-        ReturnStatus status2 = fileCopy(src, dst);
+        ReturnStatus status2 = fileCopy(false, src, dst);
         assertTrue(status2.rc == 0);
         assertTrue(FileUtil.isContentIdentical(src, dst));
         assertTrue(status2.stats.numFiles() == numDirs + numFiles);
@@ -1031,7 +1037,7 @@ public class SystemTest
         assertTrue(status.stats.numTransferredFiles() == numFiles);
         assertTrue(status.stats.totalLiteralSize() == fileSize);
         assertTrue(status.stats.totalMatchedSize() == 0);
-        ReturnStatus status2 = fileCopy(src, dst);
+        ReturnStatus status2 = fileCopy(false, src, dst);
         assertTrue(status2.rc == 0);
         assertTrue(FileUtil.isContentIdentical(src, dst));
         assertTrue(status2.stats.numFiles() == numDirs + numFiles);
@@ -1139,7 +1145,7 @@ public class SystemTest
         };
         _service.submit(serverTask);
         isListeningLatch.await();
-        YajSyncClient client = newClient().setStandardOut(_nullOut);
+        SyncClient client = testFactory.newClient();
         int rc = client.start(new String[] { "--port=14415", "localhost::" });
         assertTrue(rc == 0);
     }
@@ -1148,6 +1154,10 @@ public class SystemTest
     public void testProtectedServerConnectionWithPasswordFile()
             throws InterruptedException, IOException
     {
+        if (!IS_POSIX_FS) {
+            return;
+        }
+
         final CountDownLatch isListeningLatch = new CountDownLatch(1);
         final String restrictedModuleName = "Restricted";
         final String authToken = "ëẗÿåäöüﭏ사غ";
@@ -1172,7 +1182,7 @@ public class SystemTest
         };
         _service.submit(serverTask);
         isListeningLatch.await();
-        YajSyncClient client = newClient().setStandardOut(_nullOut);
+        SyncClient client = testFactory.newClient();
 
         File passwordFile = File.createTempFile("password-file", ".tmp");
         try (PrintStream out = new PrintStream(passwordFile)) {
@@ -1203,6 +1213,11 @@ public class SystemTest
     public void testProtectedServerConnectionWithPasswordAtStdin()
             throws InterruptedException
     {
+        if (testFactory instanceof NativeRsyncTestFactory) {
+            // don't test execution by native rsync: password STDIN is not supported in test execution
+            return;
+        }
+
         final CountDownLatch isListeningLatch = new CountDownLatch(1);
         final String restrictedModuleName = "Restricted";
         final String authToken = "ëẗÿåäöüﭏ사غ";
@@ -1227,7 +1242,7 @@ public class SystemTest
         };
         _service.submit(serverTask);
         isListeningLatch.await();
-        YajSyncClient client = newClient().setStandardOut(_nullOut);
+        SyncClient client = testFactory.newClient();
         System.setIn(new ByteArrayInputStream(authToken.getBytes()));
         int rc = client.start(new String[] {
                 "--port=14415", "--password-file=-",
@@ -1239,6 +1254,11 @@ public class SystemTest
     public void testInvalidPassword()
             throws InterruptedException
     {
+        if (testFactory instanceof NativeRsyncTestFactory) {
+            // don't test execution by native rsync: password STDIN is not supported in test execution
+            return;
+        }
+
         final CountDownLatch isListeningLatch = new CountDownLatch(1);
         final String restrictedModuleName = "Restricted";
         final String authToken = "testAuthToken";
@@ -1264,7 +1284,7 @@ public class SystemTest
         };
         _service.submit(serverTask);
         isListeningLatch.await();
-        YajSyncClient client = newClient().setStandardOut(_nullOut);
+        SyncClient client = testFactory.newClient();
         System.setIn(new ByteArrayInputStream((authToken + "fail").getBytes()));
         int rc = client.start(new String[] {
                 "--port=14415", "--password-file=-",
@@ -1278,7 +1298,7 @@ public class SystemTest
         final CountDownLatch isListeningLatch = new CountDownLatch(1);
         final int port = 14416;
 
-        Thread serverThread = new ReadTimeoutTestServer(isListeningLatch, port);
+        ReadTimeoutTestServer serverThread = new ReadTimeoutTestServer(isListeningLatch, port);
         serverThread.start();
         isListeningLatch.await();
 
@@ -1294,7 +1314,11 @@ public class SystemTest
                                                                    _contimeout,
                                                                    _timeout);
 
-        testTimeoutHelper(sock);
+        try {
+            testTimeoutHelper(sock);
+        } finally {
+            serverThread.stopServer();
+        }
     }
 
     @Test(expected=SocketTimeoutException.class, timeout=2000)
@@ -1316,9 +1340,9 @@ public class SystemTest
     public void testTlsReadTimeout() throws Throwable
     {
         final CountDownLatch isListeningLatch = new CountDownLatch(1);
-        final int port = 14417;
+        final int port = 14416;
 
-        Thread serverThread = new ReadTimeoutTestServer(isListeningLatch, port);
+        ReadTimeoutTestServer serverThread = new ReadTimeoutTestServer(isListeningLatch, port);
         serverThread.start();
         isListeningLatch.await();
 
@@ -1334,7 +1358,11 @@ public class SystemTest
                                                                _contimeout,
                                                                _timeout);
 
-        testTimeoutHelper(sock);
+        try {
+            testTimeoutHelper(sock);
+        } finally {
+            serverThread.stopServer();
+        }
     }
 
     @Test(expected=SocketTimeoutException.class, timeout=2000)
@@ -1369,6 +1397,7 @@ public class SystemTest
 
         private final CountDownLatch _isListeningLatch;
         private final int _port;
+        private ServerSocket _serverSocket;
 
         public ReadTimeoutTestServer(CountDownLatch isListeningLatch,
                                      int port)
@@ -1380,23 +1409,26 @@ public class SystemTest
         @Override
         public void run()
         {
-            ServerSocket serverSocket = null;
             try {
-                serverSocket = new ServerSocket(_port);
+                _serverSocket = new ServerSocket(_port);
 
                 _isListeningLatch.countDown();
 
                 while (true) {
-                    serverSocket.accept();
+                    _serverSocket.accept();
                 }
             } catch (Exception e) {
                 e.printStackTrace();
             } finally {
-                if (serverSocket != null && !serverSocket.isClosed()) {
-                    try {
-                        serverSocket.close();
-                    } catch (IOException e) {
-                    }
+                stopServer();
+            }
+        }
+
+        public void stopServer() {
+            if (_serverSocket != null && !_serverSocket.isClosed()) {
+                try {
+                    _serverSocket.close();
+                } catch (IOException e) {
                 }
             }
         }
@@ -1435,8 +1467,8 @@ public class SystemTest
         FileUtil.writeToFiles(7, srcFile1);
         FileUtil.writeToFiles(8, srcFile2);
 
-        YajSyncClient client = newClient().setStandardOut(_nullOut);
-        int rc = client.start(new String[] { "--port=14415", "--recursive", "--delete-excluded", "--exclude=file1", "--filter='protect file1'", srcDir1.toAbsolutePath().toString(), "localhost::test" });
+        SyncClient client = testFactory.newClient();
+        int rc = client.start(new String[] { "--port=14415", "--recursive", "--delete-excluded", "--exclude=file1", "--filter=protect file1", srcDir1.toAbsolutePath().toString(), "localhost::test" });
         assertTrue(rc == 0);
     }
 }
